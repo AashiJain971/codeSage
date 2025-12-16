@@ -1,0 +1,25 @@
+/* Home page specific styles - force light mode */
+.home-page.light-mode {
+  background: #ffffff !important;
+  color: #1a202c !important;
+  min-height: 100vh;
+}
+
+/* Ensure body background is also white for home page */
+body:has(.home-page.light-mode) {
+  background: #ffffff !important;
+  color: #1a202c !important;
+}
+
+/* Override dark mode media query for home page */
+@media (prefers-color-scheme: dark) {
+  .home-page.light-mode {
+    background: #ffffff !important;
+    color: #1a202c !important;
+  }
+  
+  body:has(.home-page.light-mode) {
+    background: #ffffff !important;
+    color: #1a202c !important;
+  }
+}

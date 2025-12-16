@@ -1,0 +1,11 @@
+fastapi
+groq
+gTTS
+supabase
+PyAudio
+PyPDF2
+aiofiles
+python-multipart
+numpy
+cryptography
+dotenv

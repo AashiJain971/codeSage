@@ -1,0 +1,62 @@
+/* TypewriterIntro.css - scoped to home page */
+.typewriter-intro {
+  --primary-white: #ffffff;
+  --gradient-primary: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+  --cyan: #06b6d4;
+}
+
+.typewriter-intro {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  background: var(--primary-white);
+  /* Ensure it's always visible */
+  opacity: 1;
+  visibility: visible;
+}
+
+.typewriter-content {
+  text-align: center;
+  z-index: 10;
+}
+
+.typewriter-text {
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  font-weight: 800;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  min-height: 1.2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.cursor {
+  color: var(--cyan);
+  animation: blink 1s infinite;
+  margin-left: 4px;
+  font-weight: 400;
+  font-size: 1.1em;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@media (max-width: 768px) {
+  .typewriter-text {
+    padding: 0 1rem;
+  }
+}
