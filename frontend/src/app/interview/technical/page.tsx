@@ -1,6 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
+import Navbar from '../../../components/Navbar';
 import {
   Code2,
   Mic,
@@ -943,6 +944,7 @@ export default function TechnicalInterview() {
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-hidden">
+      <Navbar />
       {/* Main Interview Interface */}
       <div className="h-screen flex flex-col">
         {/* Header */}

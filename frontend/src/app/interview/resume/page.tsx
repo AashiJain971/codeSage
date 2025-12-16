@@ -1,6 +1,7 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
+import Navbar from '../../../components/Navbar';
 import { FileText, Upload, Mic, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -927,7 +928,9 @@ export default function ResumeInterviewPage() {
 
   // Interview Console View
   return (
-    <div className="min-h-screen bg-gray-900 flex">
+    <div className="min-h-screen bg-gray-900 flex flex-col">
+      <Navbar theme="dark" />
+      <div className="flex-1 flex">
       {/* Main Video Area - Left Side */}
       <div className="flex-1 relative" style={{ width: `calc(100% - ${chatPanelWidth}px)` }}>
         {/* Background: user's camera video (full screen) */}
@@ -1159,6 +1162,7 @@ export default function ResumeInterviewPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );
