@@ -790,6 +790,21 @@ export default function TechnicalInterview() {
   if (!interviewStarted) {
     return (
       <div className="min-h-screen bg-gray-50 overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50"
+        >
+          <Link 
+            href="/interview" 
+            className="inline-flex items-center space-x-2 text-cyan-600 hover:text-cyan-700 transition-all duration-200 hover:scale-105 bg-white/80 backdrop-blur-sm px-3 py-2 sm:px-4 sm:py-2 rounded-full shadow-sm hover:shadow-md text-sm sm:text-base"
+          >
+            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="font-medium hidden sm:inline">Back to Selection</span>
+            <span className="font-medium sm:hidden">Back</span>
+          </Link>
+        </motion.div>
+
         <div className="flex items-center justify-center min-h-screen pt-20">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
