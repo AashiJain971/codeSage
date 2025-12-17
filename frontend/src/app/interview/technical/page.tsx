@@ -978,7 +978,6 @@ export default function TechnicalInterview() {
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-hidden">
-      <Navbar />
       {/* Main Interview Interface */}
       <div className="h-screen flex flex-col">
         {/* Header */}

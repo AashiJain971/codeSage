@@ -1107,7 +1107,6 @@ export default function ResumeInterviewPage() {
   // Interview Console View
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
-      <Navbar theme="dark" />
       <div className="flex-1 flex">
       {/* Main Video Area - Left Side */}
       <div className="flex-1 relative" style={{ width: `calc(100% - ${chatPanelWidth}px)` }}>
