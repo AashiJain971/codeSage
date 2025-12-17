@@ -984,40 +984,47 @@ export default function TechnicalInterview() {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shadow-sm"
+          className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 bg-white border-b border-gray-200 shadow-sm gap-2 sm:gap-3"
         >
-          <div className="flex items-center space-x-4">
-            <Brain className="w-8 h-8 text-cyan-600" />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
+          <div className="flex items-center space-x-2 sm:space-x-4 w-full sm:flex-1 min-w-0">
+            <Brain className="w-6 h-6 sm:w-7 sm:h-7 lg:w-8 lg:h-8 text-cyan-600 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <h1 className="text-sm sm:text-base lg:text-lg xl:text-xl font-bold text-gray-900 truncate">
                 AI Technical Interview
               </h1>
-              <div className="flex items-center space-x-4 text-sm text-gray-600">
-                <span>Question {currentQuestionIndex + 1}</span>
-                <span>•</span>
-                <span>Hints: {hintsUsed}</span>
-                <span>•</span>
-                <span>
-                  Time: {Math.floor((Date.now() - questionStartTime) / 1000)}s
+              <div className="flex flex-wrap items-center gap-x-1.5 sm:gap-x-3 lg:gap-x-4 gap-y-1 text-xs sm:text-sm text-gray-600">
+                <span className="whitespace-nowrap">Q{currentQuestionIndex + 1}</span>
+                <span className="hidden sm:inline text-gray-400">•</span>
+                <span className="whitespace-nowrap">Hints: {hintsUsed}</span>
+                <span className="hidden sm:inline text-gray-400">•</span>
+                <span className="whitespace-nowrap">
+                  {Math.floor((Date.now() - questionStartTime) / 1000)}s
                 </span>
                 {approachDiscussed && (
-                  <span className="text-green-600">✓ Approach</span>
+                  <>
+                    <span className="hidden sm:inline text-gray-400">•</span>
+                    <span className="text-green-600 whitespace-nowrap flex items-center">
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      <span className="hidden sm:inline">Approach</span>
+                      <span className="sm:hidden">✓</span>
+                    </span>
+                  </>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2 bg-green-100 px-3 py-1 rounded-full">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-green-700">Live</span>
+          <div className="flex items-center space-x-2 sm:space-x-3 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex items-center space-x-1.5 sm:space-x-2 bg-green-50 border border-green-200 px-2.5 sm:px-3 py-1.5 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0"></div>
+              <span className="text-xs sm:text-sm text-green-700 font-medium whitespace-nowrap">Live</span>
             </div>
 
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => router.push("/")}
-              className="p-2 bg-red-100 rounded-lg text-red-600 hover:bg-red-200 transition-all"
+              className="p-2 sm:p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 hover:bg-red-100 transition-all min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
             </motion.button>
@@ -1025,24 +1032,24 @@ export default function TechnicalInterview() {
         </motion.div>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden pb-20 lg:pb-0">
           {/* Left Side - Code Editor */}
           <motion.div
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex-1 flex flex-col bg-white border-r border-gray-200"
+            className="w-full lg:w-1/2 xl:w-3/5 flex flex-col bg-white lg:border-r border-gray-200 min-h-[400px] lg:min-h-0"
           >
             {/* Language Selector */}
-            <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-200">
-              <div className="flex items-center space-x-4">
-                <Terminal className="w-5 h-5 text-cyan-600" />
+            <div className="flex flex-col gap-3 p-3 sm:p-4 bg-gray-50 border-b border-gray-200">
+              <div className="flex items-center space-x-2 sm:space-x-3 w-full">
+                <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 flex-shrink-0" />
                 <select
                   value={language}
                   onChange={(e) => {
                     setLanguage(e.target.value);
                     setCode(getLanguageTemplate(e.target.value));
                   }}
-                  className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-gray-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  className="bg-white border-2 border-gray-300 rounded-lg px-3 sm:px-4 py-2.5 text-sm sm:text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 w-full sm:w-auto min-h-[46px] font-medium"
                 >
                   <option value="python">Python</option>
                   <option value="javascript">JavaScript</option>
@@ -1051,32 +1058,33 @@ export default function TechnicalInterview() {
                 </select>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 w-full">
                 <motion.button
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={requestHint}
-                  className="px-4 py-2 bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-xl text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center space-x-1"
+                  className="px-3 sm:px-4 py-2.5 sm:py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-xl text-sm sm:text-base font-semibold shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2 min-h-[46px]"
                 >
+                  <Zap className="w-4 h-4 flex-shrink-0" />
                   <span>Hint</span>
                 </motion.button>
 
                 <motion.button
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={
                     isRecordingApproach
                       ? stopApproachDiscussion
                       : discussApproach
                   }
-                  className={`px-4 py-2 rounded-xl text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-200 flex items-center space-x-1 ${
+                  className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-semibold shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2 min-h-[46px] ${
                     isRecordingApproach
                       ? "bg-gradient-to-r from-red-500 to-pink-600 text-white"
                       : "bg-gradient-to-r from-green-500 to-emerald-600 text-white"
                   }`}
                 >
                   <Mic
-                    className={`w-4 h-4 ${
+                    className={`w-4 h-4 flex-shrink-0 ${
                       isRecordingApproach ? "animate-pulse" : ""
                     }`}
                   />
@@ -1086,18 +1094,40 @@ export default function TechnicalInterview() {
             </div>
 
             {/* Code Editor */}
-            <div className="flex-1 p-4">
-              <textarea
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="w-full h-full bg-white border border-gray-300 text-gray-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none leading-relaxed rounded-lg p-3"
-                placeholder="Write your solution here..."
-                spellCheck={false}
-              />
+            <div className="flex-1 p-3 sm:p-4 lg:p-5 overflow-hidden">
+              <div className="relative w-full h-full">
+                <textarea
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="w-full h-full min-h-[300px] sm:min-h-[350px] lg:min-h-[450px] max-h-[500px] sm:max-h-[600px] lg:max-h-[700px] bg-white border-2 border-gray-300 text-gray-900 font-mono text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 resize-vertical rounded-lg p-3 sm:p-4 touch-manipulation
+                  overflow-y-auto
+                  [&::-webkit-scrollbar]:w-2
+                  [&::-webkit-scrollbar-track]:bg-gray-100
+                  [&::-webkit-scrollbar-track]:rounded-full
+                  [&::-webkit-scrollbar-thumb]:bg-gray-400
+                  [&::-webkit-scrollbar-thumb]:rounded-full
+                  [&::-webkit-scrollbar-thumb:hover]:bg-gray-500
+                  [&::-webkit-scrollbar-thumb]:transition-colors"
+                  placeholder="Write your solution here..."
+                  spellCheck={false}
+                  style={{ 
+                    lineHeight: '1.6',
+                    overflowY: 'auto',
+                    scrollBehavior: 'smooth',
+                    WebkitOverflowScrolling: 'touch'
+                  }}
+                />
+                {/* Line count indicator */}
+                {code && (
+                  <div className="absolute bottom-2 right-2 px-2 py-1 bg-gray-800/80 text-white text-xs rounded-md pointer-events-none font-mono">
+                    {code.split('\n').length} lines
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Submit Button */}
-            <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-row gap-6 justify-center">
+            {/* Submit Button - Desktop Only */}
+            <div className="hidden lg:flex p-3 sm:p-4 lg:p-5 bg-gray-50 border-t border-gray-200 flex-col gap-3 flex-shrink-0">
               <motion.button
                 whileHover={{
                   scale: 1.02,
@@ -1107,10 +1137,10 @@ export default function TechnicalInterview() {
                 whileTap={{ scale: 0.98 }}
                 onClick={submitCode}
                 disabled={!code.trim()}
-                className="w-full py-2 max-w-2xs bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center justify-center space-x-2 relative overflow-hidden group"
+                className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white rounded-xl text-base sm:text-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center justify-center gap-2 sm:gap-3 relative overflow-hidden group min-h-[50px]"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                <Send className="w-5 h-5 relative z-10" />
+                <Send className="w-5 h-5 relative z-10 flex-shrink-0" />
                 <span className="relative z-10">Submit Solution</span>
                 <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl"></div>
               </motion.button>
@@ -1124,51 +1154,50 @@ export default function TechnicalInterview() {
                 whileTap={{ scale: 0.98 }}
                 onClick={endInterview}
                 disabled={isEndingInterview}
-                className="w-full max-w-2xs py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl text-base sm:text-lg font-bold shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2 sm:gap-3 disabled:opacity-50 disabled:cursor-not-allowed min-h-[50px]"
               >
                 <span>End Interview</span>
-                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform flex-shrink-0" />
               </motion.button>
             </div>
           </motion.div>
 
           {/* Right Side - Question & Chat */}
-          <div className="flex flex-row h-full">
-            <div className="w-96 flex flex-col h-full">
+          <div className="flex flex-col lg:flex-row w-full lg:w-1/2 xl:w-2/5 h-auto lg:h-full border-t lg:border-t-0 lg:border-l border-gray-200 overflow-y-auto lg:overflow-y-visible">
+            <div className="w-full lg:w-80 xl:w-96 flex flex-col h-auto lg:h-full">
               {/* Question Panel */}
               <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 bg-white border-b border-gray-200 h-1/2 overflow-y-auto"
+                className="p-3 sm:p-4 bg-white border-b border-gray-200 min-h-[250px] lg:h-1/2 overflow-y-auto flex-shrink-0"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                    <Eye className="w-5 h-5 mr-2 text-purple-600" />
-                    Current Question
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center">
+                    <Eye className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-purple-600 flex-shrink-0" />
+                    <span>Question</span>
                   </h3>
                   <motion.button
                     whileHover={{ scale: 1.1, y: -1 }}
                     whileTap={{ scale: 0.9 }}
                     onClick={() => {
-                      initializeSpeech(); // Initialize speech on first user interaction
+                      initializeSpeech();
                       speakText(currentQuestion);
                     }}
-                    className="p-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-all duration-200 shadow-sm hover:shadow-md border border-purple-200"
+                    className="p-2.5 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-100 transition-all duration-200 shadow-sm hover:shadow-md min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0"
                   >
                     <Volume2 className="w-4 h-4" />
                   </motion.button>
                 </div>
 
-                <div className="bg-gray-50 rounded-lg p-4 border border-purple-200 h-[80%] overflow-y-auto">
-                  <p className="text-gray-800 text-sm leading-relaxed">
+                <div className="bg-gray-50 rounded-xl p-3 sm:p-4 border-2 border-purple-200 min-h-[160px] lg:h-[calc(100%-60px)] overflow-y-auto">
+                  <p className="text-gray-800 text-sm sm:text-base lg:text-lg leading-relaxed break-words">
                     {currentQuestion || "Loading question..."}
                   </p>
                   {currentQuestion && (
-                    <div className="mt-3 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
-                      <p className="text-xs text-emerald-700 flex items-center">
-                        <Mic className="w-3 h-3 mr-1" />
-                        Use "Discuss" button to talk through your approach
-                        anytime!
+                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                      <p className="text-xs sm:text-sm text-emerald-700 flex items-start">
+                        <Mic className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                        <span className="break-words">Tap "Discuss" to explain your approach with the AI interviewer</span>
                       </p>
                     </div>
                   )}
@@ -1179,25 +1208,26 @@ export default function TechnicalInterview() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-4 bg-white border-b border-gray-200 h-1/2"
+                className="p-3 sm:p-4 bg-white border-b lg:border-b-0 border-gray-200 min-h-[250px] lg:h-1/2 overflow-y-auto flex-shrink-0"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-gray-900 flex items-center">
-                    <Camera className="w-4 h-4 mr-2 text-cyan-600" />
-                    Camera
-                  </h4>
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                    <h4 className="text-base font-bold text-gray-900 flex items-center">
+                      <Camera className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-cyan-600 flex-shrink-0" />
+                      Camera
+                    </h4>
 
-                  <div className="flex flex-row gap-4">
+                    <div className="flex flex-row gap-2 sm:gap-3">
                     <motion.button
                       whileHover={{ scale: 1.1, y: -1 }}
                       whileTap={{ scale: 0.9 }}
                       onClick={() =>
                         chatOpened ? setChatOpened(false) : setChatOpened(true)
                       }
-                      className={`p-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md ${
+                      className={`p-2.5 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0 ${
                         chatOpened
-                          ? "bg-green-100 text-green-700 border border-green-200"
-                          : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
+                          ? "bg-green-50 border border-green-200 text-green-700"
+                          : "bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100"
                       }`}
                     >
                       <MessageSquareText className="w-4 h-4" />
@@ -1206,10 +1236,10 @@ export default function TechnicalInterview() {
                       whileHover={{ scale: 1.1, y: -1 }}
                       whileTap={{ scale: 0.9 }}
                       onClick={cameraEnabled ? stopCamera : initializeCamera}
-                      className={`p-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md ${
+                      className={`p-2.5 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0 ${
                         cameraEnabled
-                          ? "bg-green-100 text-green-700 border border-green-200"
-                          : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
+                          ? "bg-green-50 border border-green-200 text-green-700"
+                          : "bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100"
                       }`}
                     >
                       {cameraEnabled ? (
@@ -1221,24 +1251,52 @@ export default function TechnicalInterview() {
                   </div>
                 </div>
 
-                <div
-                  className="relative bg-gray-100 rounded-lg overflow-hidden border border-gray-300"
-                  style={{ aspectRatio: "16/9" }}
-                >
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                  {!cameraEnabled && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <CameraOff className="w-8 h-8 text-gray-400" />
-                    </div>
-                  )}
+                <div className="flex-1 min-h-[200px]">
+                  <div
+                    className="relative bg-gray-100 rounded-xl overflow-hidden border-2 border-gray-300 aspect-video w-full"
+                  >
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    {!cameraEnabled && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+                        <CameraOff className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" />
+                      </div>
+                    )}
+                  </div>
                 </div>
+              </div>
               </motion.div>
             </div>
+
+            {/* Mobile Sticky Button Bar */}
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-300 p-3 shadow-2xl z-50">
+              <div className="flex gap-2">
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  onClick={submitCode}
+                  disabled={!code.trim()}
+                  className="flex-1 py-3.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white rounded-xl text-base font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center justify-center gap-2 min-h-[50px] touch-manipulation"
+                >
+                  <Send className="w-4 h-4 flex-shrink-0" />
+                  <span>Submit</span>
+                </motion.button>
+
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  onClick={endInterview}
+                  disabled={isEndingInterview}
+                  className="flex-1 py-3.5 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl text-base font-bold shadow-lg flex items-center justify-center gap-2 min-h-[50px] touch-manipulation"
+                >
+                  <span>End</span>
+                  <ArrowLeft className="w-4 h-4 flex-shrink-0" />
+                </motion.button>
+              </div>
+            </div>
+
             {/* AI Chat */}
             <AnimatePresence>
               {chatOpened && (
@@ -1247,18 +1305,19 @@ export default function TechnicalInterview() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: "100%" }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="w-96 flex flex-col bg-white border-l border-gray-200"
+                  className="w-full lg:w-80 xl:w-96 flex flex-col bg-white border-t lg:border-t-0 lg:border-l border-gray-200 max-h-[400px] lg:max-h-none lg:h-full"
                 >
-                  <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                      <Bot className="w-5 h-5 mr-2 text-cyan-600" />
-                      AI Assistant
+                  <div className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center">
+                      <Bot className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-cyan-600" />
+                      <span className="hidden sm:inline">AI Assistant</span>
+                      <span className="sm:hidden">AI Chat</span>
                     </h3>
                     <motion.button
                       whileHover={{ scale: 1.1, y: -1 }}
                       whileTap={{ scale: 0.9 }}
                       onClick={() => setAudioEnabled(!audioEnabled)}
-                      className={`p-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md ${
+                      className={`p-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md min-h-[44px] min-w-[44px] flex items-center justify-center ${
                         audioEnabled
                           ? "bg-green-100 text-green-700 border border-green-200"
                           : "bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200"
@@ -1274,7 +1333,7 @@ export default function TechnicalInterview() {
 
                   <div
                     ref={chatContainerRef}
-                    className="flex-1 overflow-y-auto p-4 space-y-3"
+                    className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3"
                   >
                     <AnimatePresence>
                       {chatMessages.map((message) => (
@@ -1304,15 +1363,15 @@ export default function TechnicalInterview() {
                           )}
 
                           <div
-                            className={`max-w-xs px-3 py-2 rounded-lg text-sm ${
+                            className={`max-w-[75%] sm:max-w-xs px-3 py-2 rounded-lg text-xs sm:text-sm ${
                               message.type === "user"
-                                ? "bg-cyan-500 text-white ml-8"
+                                ? "bg-cyan-500 text-white ml-4 sm:ml-8"
                                 : message.type === "ai"
                                 ? "bg-gray-100 text-gray-800"
                                 : "bg-yellow-100 text-yellow-800"
                             }`}
                           >
-                            <p className="leading-relaxed">{message.content}</p>
+                            <p className="leading-relaxed break-words">{message.content}</p>
                             <span className="text-xs opacity-60 mt-1 block">
                               {message.timestamp.toLocaleTimeString()}
                             </span>
