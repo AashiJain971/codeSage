@@ -59,12 +59,12 @@ const Features = () => {
 
   return (
     <section className="features section" id="features">
-      <div className="container">
-        <h2 className="section-title slide-up">
+      <div className="container px-4 sm:px-6 lg:px-8">
+        <h2 className="section-title slide-up text-2xl sm:text-3xl lg:text-4xl">
           Why Choose CodeSage?
         </h2>
         
-        <div className="features-grid">
+        <div className="features-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8 mt-8 lg:mt-12">
           {features.map((feature, index) => (
             <div 
               key={feature.id} 

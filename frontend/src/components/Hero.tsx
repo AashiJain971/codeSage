@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import './Hero.css';
 import Navbar from './Navbar';
 import Features from './Features';
@@ -11,23 +12,50 @@ interface HeroProps {
 }
 
 const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
+  const phrase = 'Interviews Reimagined...';
+  const [displayText, setDisplayText] = useState('');
+
+  useEffect(() => {
+    const typingSpeed = 100; // ms per character
+    const pauseAtEnd = 1500; // ms pause at end before restarting
+    
+    // Typing animation
+    if (displayText.length < phrase.length) {
+      const timer = setTimeout(() => {
+        setDisplayText(phrase.substring(0, displayText.length + 1));
+      }, typingSpeed);
+      return () => clearTimeout(timer);
+    }
+    
+    // Completed typing, pause then restart
+    if (displayText.length === phrase.length) {
+      const timer = setTimeout(() => {
+        setDisplayText('');
+      }, pauseAtEnd);
+      return () => clearTimeout(timer);
+    }
+  }, [displayText, phrase]);
+
   return (
     <>
       <Navbar />
       <section className="hero section" id="home">
         <div className="container">
-          <div className="hero-content">
-            <div className="hero-left slide-up">
-              <h1 className="hero-title">
-                Redefining Interview Preparation
+          <div className="hero-content flex flex-col lg:flex-row items-center gap-8 lg:gap-16">
+            <div className="hero-left slide-up w-full lg:w-1/2">
+              <h1 className="hero-title text-3xl sm:text-4xl lg:text-5xl xl:text-6xl">
+                <span className="typewriter-text">
+                  {displayText}
+                  <span className="typewriter-cursor">|</span>
+                </span>
               </h1>
-              <p className="hero-subtitle">
+              <p className="hero-subtitle text-base sm:text-lg lg:text-xl">
                 Experience the future of interview practice with AI-powered mock interviews, 
                 intelligent feedback, and personalized learning paths.
               </p>
-              <div className="hero-buttons">
-                <button onClick={onTakeInterview} className="btn btn-primary glow-on-hover">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <div className="hero-buttons flex flex-col sm:flex-row gap-4 mt-6 sm:mt-8">
+                <button onClick={onTakeInterview} className="btn btn-primary glow-on-hover w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-4 text-sm sm:text-base min-h-[48px]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
                     <polygon points="5,3 19,12 5,21 5,3"></polygon>
                   </svg>
                   Start Interview
@@ -35,8 +63,8 @@ const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
               </div>
             </div>
             
-            <div className="hero-right slide-up">
-              <div className="hero-illustration">
+            <div className="hero-right slide-up w-full lg:w-1/2 mt-8 lg:mt-0">
+              <div className="hero-illustration relative">
                 <div className="floating-card card-1">
                   <div className="card-icon">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

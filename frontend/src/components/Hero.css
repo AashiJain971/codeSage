@@ -13,6 +13,11 @@
   color: #1a202c !important;
 }
 
+/* Prevent horizontal scroll */
+body {
+  overflow-x: hidden;
+}
+
 .hero {
   min-height: 100vh;
   display: flex;
@@ -24,10 +29,6 @@
 }
 
 .hero-content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4rem;
-  align-items: center;
   position: relative;
   z-index: 2;
 }
@@ -41,24 +42,44 @@
 }
 
 .hero-buttons {
-  display: flex;
-  gap: 1rem;
-  margin-top: 2rem;
+  /* Layout handled by Tailwind classes */
 }
 
 .hero-title {
-  font-size: 3.5rem;
   font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 1.5rem;
   line-height: 1.2;
+  min-height: 1.2em; /* Prevent layout shift during typing */
+  /* Font sizes handled by Tailwind classes */
+}
+
+.typewriter-text {
+  display: inline-block;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  margin-left: 0.1em;
+  animation: blink 0.7s step-end infinite;
+  color: var(--cyan);
+  font-weight: 400;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
 }
 
 .hero-subtitle {
-  font-size: 1.2rem;
   color: var(--text-secondary);
   margin-bottom: 2rem;
   line-height: 1.6;
+  /* Font sizes handled by Tailwind classes */
 }
 
 .btn {
@@ -110,9 +131,21 @@
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 2rem;
+  padding: 0 1rem;
   position: relative;
   z-index: 2;
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding: 0 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container {
+    padding: 0 2rem;
+  }
 }
 
 .slide-up {
@@ -354,44 +387,119 @@
 }
 
 /* Responsive Design */
-@media (max-width: 768px) {
+/* Mobile First - Base Styles (< 640px) */
+@media (max-width: 639px) {
   .hero {
-    padding-top: 80px;
-    text-align: center;
-  }
-  
-  .hero-content {
-    grid-template-columns: 1fr;
-    gap: 2rem;
-  }
-  
-  .hero-buttons {
-    flex-direction: column;
-    align-items: center;
+    padding-top: 70px;
+    min-height: auto;
+    padding-bottom: 2rem;
   }
   
   .hero-illustration {
-    height: 300px;
+    height: 350px;
   }
   
   .hero-main-visual {
-    width: 200px;
-    height: 200px;
+    width: 220px;
+    height: 220px;
   }
   
   .brain-outline {
-    width: 150px;
-    height: 150px;
+    width: 160px;
+    height: 160px;
+  }
+  
+  .brain-outline::before {
+    width: 140px;
+    height: 140px;
+  }
+  
+  .neural-network {
+    width: 130px;
+    height: 130px;
   }
   
   .floating-card {
-    position: relative;
-    margin: 1rem auto;
+    width: 100px;
+    height: 80px;
+    padding: 0.75rem;
+    font-size: 0.7rem;
   }
   
-  .card-1, .card-2, .card-3 {
-    position: static;
-    display: inline-flex;
-    margin: 0.5rem;
+  .card-icon {
+    width: 24px;
+    height: 24px;
+  }
+  
+  .card-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .card-1 {
+    top: 5%;
+    left: 2%;
+  }
+  
+  .card-2 {
+    top: 5%;
+    right: 2%;
+  }
+  
+  .card-3 {
+    bottom: 5%;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+/* Tablet (640px - 1023px) */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .hero {
+    padding-top: 80px;
+  }
+  
+  .hero-illustration {
+    height: 400px;
+  }
+  
+  .hero-main-visual {
+    width: 260px;
+    height: 260px;
+  }
+  
+  .brain-outline {
+    width: 180px;
+    height: 180px;
+  }
+  
+  .floating-card {
+    width: 130px;
+    height: 100px;
+    padding: 1rem;
+    font-size: 0.8rem;
+  }
+  
+  .card-1 {
+    top: 10%;
+    left: 5%;
+  }
+  
+  .card-2 {
+    top: 10%;
+    right: 10%;
+  }
+  
+  .card-3 {
+    bottom: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+/* Desktop (1024px+) */
+@media (min-width: 1024px) {
+  .hero {
+    padding-top: 100px;
   }
 }
