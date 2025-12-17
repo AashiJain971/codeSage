@@ -54,12 +54,14 @@ export default function ResumeInterviewPage() {
   const [isCodeMode, setIsCodeMode] = useState(false);
   const [isEndingInterview, setIsEndingInterview] = useState(false);
   const [interviewCompleted, setInterviewCompleted] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
+  const endTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const HTTP_BASE = 'http://127.0.0.1:8000';
   const WS_URL = 'ws://127.0.0.1:8000/ws';
@@ -347,9 +349,8 @@ export default function ResumeInterviewPage() {
         } else if (msg.type === 'ended') {
           // Don't show "ENDED" in chat
           setPhaseStatus('');
-          // Check if we have interview results
+          // Save results info if provided (optional - completion screen handles navigation)
           if (msg.interview_id && msg.download_url) {
-            // Save results info to localStorage for results page
             const resultsData = {
               interview_id: msg.interview_id,
               download_url: `http://127.0.0.1:8000${msg.download_url}`,
@@ -358,8 +359,7 @@ export default function ResumeInterviewPage() {
             };
             localStorage.setItem('interviewResults', JSON.stringify(resultsData));
           }
-          // Redirect to results page
-          router.push('/interview/results');
+          // DO NOT NAVIGATE - Let completion screen handle navigation flow
         } else if (msg.type === 'error') {
           // Don't show "ERROR:" in chat - only reset phase
           setPhaseStatus('');
@@ -507,10 +507,8 @@ export default function ResumeInterviewPage() {
       wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
     
-    // Show loading screen
+    // Show loading screen IMMEDIATELY
     setIsEndingInterview(true);
-    
-    // Stop camera
     stopCamera();
     
     // Save minimal session data to localStorage (avoid quota exceeded error)
@@ -524,23 +522,28 @@ export default function ResumeInterviewPage() {
       localStorage.setItem('lastInterviewSession', JSON.stringify(sessionData));
     } catch (e) {
       console.warn('Failed to save session to localStorage:', e);
-      // Continue without saving - the results page will handle missing data
     }
     
-    // Simulate processing delay (2.5 seconds), then show completion screen
-    setTimeout(() => {
+    // Clear any existing timeout first
+    if (endTimeoutRef.current) {
+      clearTimeout(endTimeoutRef.current);
+    }
+    
+    // ONE SINGLE TIMEOUT: Exactly 2.5 seconds total
+    endTimeoutRef.current = setTimeout(() => {
       setIsEndingInterview(false);
       setInterviewCompleted(true);
       
-      // Close WebSocket after showing completion
-      setTimeout(() => {
-        if (wsRef.current) {
-          wsRef.current.close();
-          wsRef.current = null;
-        }
-        setIsConnected(false);
-      }, 2000);
-    }, 2500);
+      // Close WebSocket immediately (no extra timeout)
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setIsConnected(false);
+      
+      // Clear timeout ref
+      endTimeoutRef.current = null;
+    }, 2500); // EXACTLY 2.5 seconds - no nested timeouts
   };
 
   useEffect(() => {
@@ -573,6 +576,10 @@ export default function ResumeInterviewPage() {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+      }
+      // Cleanup timeout on unmount
+      if (endTimeoutRef.current) {
+        clearTimeout(endTimeoutRef.current);
       }
     };
   }, []);
@@ -990,12 +997,41 @@ export default function ResumeInterviewPage() {
 
   // Completion screen
   if (interviewCompleted) {
+    const handleReturn = () => {
+      setIsExiting(true);  // Start exit animation
+      
+      // Wait for animation to complete (500ms) THEN navigate
+      setTimeout(() => {
+        // RESET ALL STATES before navigating
+        setIsEndingInterview(false);
+        setInterviewCompleted(false);
+        setInterviewStarted(false);
+        setResumeId(null);
+        setResumeFile(null);
+        setLogs([]);
+        setAnswer('');
+        setCode('');
+        
+        // Clear any stored data
+        localStorage.removeItem('lastInterviewSession');
+        localStorage.removeItem('interviewResults');
+        localStorage.removeItem('interviewSession');
+        
+        router.push("/interview");  // Navigate after animation
+      }, 500);
+    };
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-white via-cyan-50 to-violet-50 overflow-hidden">
         <div className="flex items-center justify-center min-h-screen pt-20">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            animate={{ 
+              opacity: isExiting ? 0 : 1, 
+              scale: isExiting ? 0.9 : 1,
+              y: isExiting ? 50 : 0
+            }}
+            transition={{ duration: 0.5 }}
             className="max-w-2xl mx-auto p-12 bg-white rounded-3xl shadow-2xl border border-gray-100 text-center"
             style={{
               background:
@@ -1034,25 +1070,11 @@ export default function ResumeInterviewPage() {
               className="flex flex-col space-y-4 max-w-md mx-auto"
             >
               <motion.button
-                whileHover={{ scale: 1.05, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  // Reset interview state and navigate to interview selection page
-                  setInterviewCompleted(false);
-                  setInterviewStarted(false);
-                  setResumeId(null);
-                  setResumeFile(null);
-                  setLogs([]);
-                  setAnswer('');
-                  setCode('');
-                  // Clear any stored session data
-                  localStorage.removeItem('interviewSession');
-                  localStorage.removeItem('interviewResults');
-                  localStorage.removeItem('lastInterviewSession');
-                  // Navigate to interview selection page
-                  router.push("/interview");
-                }}
-                className="w-full px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-cyan-600 hover:via-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl flex items-center justify-center group relative overflow-hidden"
+                whileHover={{ scale: isExiting ? 1 : 1.05, y: isExiting ? 0 : -2 }}
+                whileTap={{ scale: isExiting ? 1 : 0.95 }}
+                onClick={handleReturn}
+                disabled={isExiting}
+                className="w-full px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-cyan-600 hover:via-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl flex items-center justify-center group relative overflow-hidden disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <ArrowLeft className="w-5 h-5 mr-3 group-hover:-translate-x-1 transition-transform relative z-10" />

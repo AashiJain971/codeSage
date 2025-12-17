@@ -115,6 +115,7 @@ export default function TechnicalInterview() {
   const [showResults, setShowResults] = useState(false);
   const [interviewCompleted, setInterviewCompleted] = useState(false);
   const [isEndingInterview, setIsEndingInterview] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const [chatOpened, setChatOpened] = useState(false);
 
   const [speechInitialized, setSpeechInitialized] = useState(false);
@@ -616,8 +617,6 @@ export default function TechnicalInterview() {
           speechSynthesis.pause();
         }
         setIsRecordingApproach(false);
-        setIsEndingInterview(false); // Reset ending state
-        setInterviewStarted(false);
         addChatMessage("ai", "Interview Complete!");
         addChatMessage("ai", data.final_feedback || "");
 
@@ -672,16 +671,21 @@ export default function TechnicalInterview() {
         };
         localStorage.setItem("interviewResults", JSON.stringify(resultsData));
 
-        // Show completion screen
-        setInterviewCompleted(true);
-
+        // Wait exactly 2.5 seconds before showing completion screen
         setTimeout(() => {
-          if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
-          }
-          setIsConnected(false);
-        }, 2000);
+          setIsEndingInterview(false); // Hide loading screen
+          setInterviewCompleted(true); // Show completion screen
+          setInterviewStarted(false); // Now safe to set false after completion screen is shown
+          
+          // Close WebSocket after showing completion
+          setTimeout(() => {
+            if (wsRef.current) {
+              wsRef.current.close();
+              wsRef.current = null;
+            }
+            setIsConnected(false);
+          }, 2000);
+        }, 2500); // EXACTLY 2.5 seconds
         break;
 
       case "error":
@@ -693,12 +697,43 @@ export default function TechnicalInterview() {
 
   // Interview completion screen
   if (interviewCompleted) {
+    const handleReturn = () => {
+      setIsExiting(true);  // Start exit animation
+      
+      // Wait for animation to complete (500ms) THEN navigate
+      setTimeout(() => {
+        // RESET ALL STATES before navigating
+        setIsEndingInterview(false);
+        setInterviewCompleted(false);
+        setInterviewStarted(false);
+        setSelectedTopics([]);
+        setCurrentQuestion("");
+        setQuestions([]);
+        setCurrentQuestionIndex(0);
+        setChatMessages([]);
+        setInterviewResults(null);
+        setShowResults(false);
+        
+        // Clear any stored session data
+        localStorage.removeItem("interviewSession");
+        localStorage.removeItem("interviewResults");
+        localStorage.removeItem("interviewStartTime");
+        
+        router.push("/interview");  // Navigate after animation
+      }, 500);
+    };
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-white via-cyan-50 to-violet-50 overflow-hidden">
         <div className="flex items-center justify-center min-h-screen pt-20">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            animate={{ 
+              opacity: isExiting ? 0 : 1, 
+              scale: isExiting ? 0.9 : 1,
+              y: isExiting ? 50 : 0
+            }}
+            transition={{ duration: 0.5 }}
             className="max-w-2xl mx-auto p-12 bg-white rounded-3xl shadow-2xl border border-gray-100 text-center"
             style={{
               background:
@@ -737,27 +772,11 @@ export default function TechnicalInterview() {
               className="flex flex-col space-y-4 max-w-md mx-auto"
             >
               <motion.button
-                whileHover={{ scale: 1.05, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  // Reset interview state and navigate to interview selection page
-                  setInterviewCompleted(false);
-                  setInterviewStarted(false);
-                  setSelectedTopics([]);
-                  setCurrentQuestion("");
-                  setQuestions([]);
-                  setCurrentQuestionIndex(0);
-                  setChatMessages([]);
-                  setInterviewResults(null);
-                  setShowResults(false);
-                  // Clear any stored session data
-                  localStorage.removeItem("interviewSession");
-                  localStorage.removeItem("interviewResults");
-                  localStorage.removeItem("interviewStartTime");
-                  // Navigate to interview selection page
-                  router.push("/interview");
-                }}
-                className="w-full px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-cyan-600 hover:via-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl flex items-center justify-center group relative overflow-hidden"
+                whileHover={{ scale: isExiting ? 1 : 1.05, y: isExiting ? 0 : -2 }}
+                whileTap={{ scale: isExiting ? 1 : 0.95 }}
+                onClick={handleReturn}
+                disabled={isExiting}
+                className="w-full px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-cyan-600 hover:via-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl flex items-center justify-center group relative overflow-hidden disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <ArrowLeft className="w-5 h-5 mr-3 group-hover:-translate-x-1 transition-transform relative z-10" />
