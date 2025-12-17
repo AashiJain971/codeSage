@@ -99,7 +99,8 @@ def interviewer_reply(candidate: str, context: list) -> dict:
         {"role": "user", "content": f"Conversation so far: {context_str}\nCandidate: {candidate}"}
     ]
     res = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        # model="llama-3.3-70b-versatile",
+        model="llama-3.1-8b-instant",
         messages=msg,
         temperature=0.3,
         max_tokens=500

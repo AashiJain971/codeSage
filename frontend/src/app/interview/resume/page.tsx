@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../../../components/Navbar';
-import { FileText, Upload, Mic, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send } from 'lucide-react';
+import { FileText, Upload, Mic, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send, X, MessageSquare } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -32,6 +32,8 @@ export default function ResumeInterviewPage() {
   const [logs, setLogs] = useState<string[]>([]);
   const [answer, setAnswer] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [blockVAD, setBlockVAD] = useState(false); // Strict VAD blocking during typing
+  const [lastSpeechEndTime, setLastSpeechEndTime] = useState(0); // Track when AI last spoke
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -56,12 +58,26 @@ export default function ResumeInterviewPage() {
   const [interviewCompleted, setInterviewCompleted] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   
+  // Responsive states
+  const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
+  const [showChatPanel, setShowChatPanel] = useState(true);
+  
+  // Typing detection state to prevent voice recording during typing
+  const [isTyping, setIsTyping] = useState(false);
+  
+  // WebSocket reconnection state
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const maxReconnectAttempts = 3;
+  
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
   const endTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const HTTP_BASE = 'http://127.0.0.1:8000';
   const WS_URL = 'ws://127.0.0.1:8000/ws';
@@ -74,15 +90,43 @@ export default function ResumeInterviewPage() {
     setPhase(text);
   };
 
+  // TEXT SIMILARITY HELPER: Calculate how similar two texts are (0-1 scale)
+  const calculateTextSimilarity = (text1: string, text2: string): number => {
+    if (!text1 || !text2) return 0;
+    
+    const words1 = text1.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const words2 = text2.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    
+    if (words1.length === 0 || words2.length === 0) return 0;
+    
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    
+    // Calculate Jaccard similarity coefficient
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    return union.size > 0 ? intersection.size / union.size : 0;
+  };
+
   const startCamera = async () => {
     try {
+      console.log('📷 Requesting camera and microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: { ideal: 1280 },
           height: { ideal: 720 }
         }, 
-        audio: false 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       });
+      console.log('✅ Camera and microphone access granted');
+      console.log('🎤 Audio tracks:', stream.getAudioTracks().map(t => t.label));
+      console.log('📹 Video tracks:', stream.getVideoTracks().map(t => t.label));
+      
       setCameraStream(stream);
       setIsCameraOn(true);
       
@@ -94,8 +138,10 @@ export default function ResumeInterviewPage() {
       }
       
       addLog('Camera started successfully');
+      console.log('✅ Camera and microphone initialized');
     } catch (error) {
-      console.error('Error accessing camera:', error);
+      console.error('❌ Error accessing camera/microphone:', error);
+      alert('Please allow camera AND microphone access for the interview to work properly');
       addLog('Camera access denied or not available');
       setIsCameraOn(false);
     }
@@ -224,88 +270,230 @@ export default function ResumeInterviewPage() {
       };
     }
   }, [isResizingCamera, resizeStartPos, resizeStartSize]);
+  
+  // Responsive layout handler
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      setIsMobile(width < 768);
+      setIsTablet(width >= 768 && width < 1024);
+      
+      // Adjust chat panel width based on screen size
+      if (width < 768) {
+        setChatPanelWidth(width);
+        setShowChatPanel(true); // Always show chat on mobile
+      } else if (width < 1024) {
+        setChatPanelWidth(Math.min(400, width * 0.4));
+        setShowChatPanel(true);
+      } else {
+        setChatPanelWidth(Math.min(600, width * 0.35));
+        setShowChatPanel(true);
+      }
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const startServerVAD = () => {
+    // ONLY block if user is actively typing (removed textarea content check)
+    if (isTyping || blockVAD) {
+      console.log('⛔ VAD BLOCKED - User is actively typing');
+      return;
+    }
+    
+    // ECHO PREVENTION: Check if we JUST finished speaking (2 second cooldown - reduced for faster response)
+    const timeSinceLastSpeech = Date.now() - lastSpeechEndTime;
+    if (lastSpeechEndTime > 0 && timeSinceLastSpeech < 2000) {
+      console.log(`⏸️ Waiting for speech cooldown... (${Math.round((2000 - timeSinceLastSpeech) / 1000)}s remaining)`);
+      setTimeout(startServerVAD, 2000 - timeSinceLastSpeech);
+      return;
+    }
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    
+    console.log('🎤 Starting VAD - Ready to listen for USER speech');
     setPhaseStatus('Listening...');
     wsRef.current.send(JSON.stringify({ type: 'record_audio' }));
   };
 
   const speakAndThenRecord = (text: string) => {
-    if (!text || !text.trim()) return;
+    if (!text || !text.trim()) {
+      console.log('⚠️ speakAndThenRecord: Empty text');
+      return;
+    }
+    
+    console.log('🔊 speakAndThenRecord called with text:', text.substring(0, 50) + '...');
+    
+    // Don't interrupt ongoing speech unless this is a new important question
+    if (window.speechSynthesis.speaking) {
+      console.log('⏸️ Speech already in progress');
+      
+      // Only cancel for new questions (indicated by length or question mark)
+      const isNewQuestion = text.includes('?') || text.length > 100;
+      
+      if (!isNewQuestion) {
+        console.log('⏩ Not interrupting current speech for continuation');
+        return; // Don't interrupt for short continuations
+      }
+      
+      console.log('🔄 Cancelling current speech for new question');
+      window.speechSynthesis.cancel();
+    }
+    
     setPhaseStatus('Speaking...');
     try {
       if (!('speechSynthesis' in window)) {
+        console.log('⚠️ speechSynthesis not available in window');
         setTimeout(startServerVAD, 400);
         return;
       }
-      window.speechSynthesis.cancel();
+      
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
+      
       setIsSpeaking(true);
+      
+      utterance.onstart = () => {
+        console.log('🗣️ Speech synthesis started');
+      };
+      
       utterance.onend = () => {
+        console.log('✅ Speech synthesis ended');
         setIsSpeaking(false);
-        startServerVAD();
+        
+        // Record when speech ended for cooldown tracking
+        setLastSpeechEndTime(Date.now());
+        
+        // ECHO PREVENTION: Delay before starting VAD (2 seconds for faster response)
+        setTimeout(() => {
+          console.log('🎯 Starting VAD after 2s speech delay');
+          startServerVAD();
+        }, 2000); // 2000ms = 2 seconds delay
       };
-      utterance.onerror = () => {
+      
+      utterance.onerror = (e) => {
+        console.error('❌ Speech synthesis error:', e);
         setIsSpeaking(false);
-        startServerVAD();
+        
+        // Still start VAD even on error, but with delay
+        setTimeout(() => {
+          startServerVAD();
+        }, 500);
       };
+      
       window.speechSynthesis.speak(utterance);
+      console.log('📢 Speech synthesis speak() called');
+      
     } catch (e) {
+      console.error('❌ Error in speakAndThenRecord:', e);
       setIsSpeaking(false);
-      startServerVAD();
+      setTimeout(startServerVAD, 500);
     }
   };
 
   const connectWebSocket = async () => {
     setIsConnecting(true);
     
+    // Clear any existing connection
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch (e) {
+        console.error('Error closing existing WebSocket:', e);
+      }
+      wsRef.current = null;
+    }
+    
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    wsRef.current = new WebSocket(WS_URL);
-    
-    wsRef.current.onopen = () => {
-      setIsConnected(true);
-      setIsConnecting(false);
-      // Don't show "WS connected" in chat
-    };
+    try {
+      wsRef.current = new WebSocket(WS_URL);
+      
+      wsRef.current.onopen = () => {
+        console.log('✅ WebSocket connected successfully');
+        setIsConnected(true);
+        setIsConnecting(false);
+        setReconnectAttempts(0);
+      };
 
-    wsRef.current.onclose = () => {
-      setIsConnected(false);
-      setIsConnecting(false);
-      // Don't show "WS closed" in chat
-      try {
-        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-      } catch {}
-      setPhaseStatus('');
-    };
+      wsRef.current.onclose = (event) => {
+        console.log('🔌 WebSocket closed:', event.code, event.reason);
+        setIsConnected(false);
+        setIsConnecting(false);
+        
+        // Stop speech synthesis
+        try {
+          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        } catch {}
+        setPhaseStatus('');
+        
+        // Attempt reconnection if interview is active and not intentionally closed
+        if (interviewStarted && !isEndingInterview && reconnectAttempts < maxReconnectAttempts && event.code !== 1000) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})...`);
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, delay);
+        }
+      };
 
-    wsRef.current.onerror = (e) => {
-      setIsConnecting(false);
-      // Don't show "WS error occurred" in chat
-    };
+      wsRef.current.onerror = (e) => {
+        console.error('❌ WebSocket error:', e);
+        setIsConnecting(false);
+      };
 
     wsRef.current.onmessage = (ev) => {
       try {
         const msg: WebSocketMessage = JSON.parse(ev.data);
+        console.log('📩 WebSocket message received:', msg);
         
         if (msg.type === 'ready') {
           // Don't show "READY:" in chat - only process question
           if (msg.next_question) {
             addLog('Q: ' + msg.next_question);
             
-            // Check if this is a coding question
-            const isCodingQuestion = /write.*code|implement|function|algorithm|program|solve.*problem|code.*solution/i.test(msg.next_question);
+            // CRITICAL: Force clear textarea to prevent any residual text
+            setAnswer('');
+            setIsTyping(false);
+            setBlockVAD(false);
+            
+            // Double-check textarea is clear after React update
+            setTimeout(() => {
+              if (answer.trim().length > 0) {
+                console.warn('⚠️ Textarea still has content after clear, forcing reset');
+                setAnswer('');
+              }
+            }, 100);
+            
+            // Check if this is a coding question - VERY SPECIFIC patterns only
+            const isCodingQuestion = (
+              /write\s+(a\s+)?(code|function|program|script|class)/i.test(msg.next_question) ||
+              /implement\s+(a\s+)?(function|class|algorithm|method)/i.test(msg.next_question) ||
+              /create\s+(a\s+)?(function|program|script)/i.test(msg.next_question) ||
+              msg.next_question.toLowerCase().includes('write code to') ||
+              msg.next_question.toLowerCase().includes('code a solution')
+            );
+            
             setIsCodeMode(isCodingQuestion);
             setShowCodeEditor(isCodingQuestion);
             
             if (isCodingQuestion) {
+              // Reset answer when switching to code mode
+              setAnswer('');
               setPhaseStatus('Please write your code and click Submit when ready');
+              console.log('💻 Code mode activated for question');
               // For coding questions, don't auto-start recording
             } else {
+              // Reset code when switching to text mode
+              setCode('');
+              setShowCodeEditor(false);
+              setIsCodeMode(false);
               speakAndThenRecord(msg.next_question);
             }
           }
@@ -314,37 +502,217 @@ export default function ResumeInterviewPage() {
           if (msg.next_question) {
             addLog('Q: ' + msg.next_question);
             
-            // Check if this is a coding question
-            const isCodingQuestion = /write.*code|implement|function|algorithm|program|solve.*problem|code.*solution/i.test(msg.next_question);
+            // CRITICAL: Force clear textarea to prevent any residual text
+            setAnswer('');
+            setIsTyping(false);
+            setBlockVAD(false);
+            
+            // Double-check textarea is clear after React update
+            setTimeout(() => {
+              if (answer.trim().length > 0) {
+                console.warn('⚠️ Textarea still has content after clear, forcing reset');
+                setAnswer('');
+              }
+            }, 100);
+            
+            // Check if this is a coding question - VERY SPECIFIC patterns only
+            const isCodingQuestion = (
+              /write\s+(a\s+)?(code|function|program|script|class)/i.test(msg.next_question) ||
+              /implement\s+(a\s+)?(function|class|algorithm|method)/i.test(msg.next_question) ||
+              /create\s+(a\s+)?(function|program|script)/i.test(msg.next_question) ||
+              msg.next_question.toLowerCase().includes('write code to') ||
+              msg.next_question.toLowerCase().includes('code a solution')
+            );
+            
             setIsCodeMode(isCodingQuestion);
             setShowCodeEditor(isCodingQuestion);
             
             if (isCodingQuestion) {
+              // Reset answer when switching to code mode
+              setAnswer('');
               setPhaseStatus('Please write your code and click Submit when ready');
+              console.log('💻 Code mode activated for question');
               // For coding questions, don't auto-start recording
             } else {
+              // Reset code when switching to text mode
+              setCode('');
+              setShowCodeEditor(false);
+              setIsCodeMode(false);
               speakAndThenRecord(msg.next_question);
             }
           } else {
+            // When no next question, ensure code editor is hidden
             setPhaseStatus('');
             setShowCodeEditor(false);
             setIsCodeMode(false);
+            setCode('');
           }
         } else if (msg.type === 'listening') {
           // Don't show "LISTENING:" in chat - only set phase
+          console.log('👂 Backend is listening for speech...');
+          console.log('⚠️ SPEAK NOW - Microphone is active');
           setPhaseStatus('Listening...');
         } else if (msg.type === 'transcribed') {
+          console.log('📨 TRANSCRIPT MESSAGE RECEIVED FROM BACKEND');
           // Show user's transcript in chat
           if (msg.transcript) {
-            addLog('You: ' + msg.transcript);
+            let transcript = msg.transcript.trim();
+            console.log('🎤 Raw transcript received:', transcript);
+            console.log('📏 Transcript length:', transcript.length, 'words:', transcript.split(/\s+/).length);
+            
+            // ABSOLUTE BLOCKING: Get last AI question for comprehensive comparison
+            const lastLogs = logs.slice(-5); // Check last 5 messages
+            const lastAIQuestion = lastLogs.reverse().find(log => log.startsWith('Q:'))?.replace('Q: ', '').trim() || '';
+            
+            if (lastAIQuestion) {
+              console.log('🔍 Last AI Question:', lastAIQuestion.substring(0, 100) + '...');
+            }
+            
+            // ULTRA-CRITICAL FILTER 1: Detect AI question patterns (questions, long sentences)
+            const aiQuestionPatterns = [
+              /^(can you|could you|would you|will you|tell me|walk me through|elaborate|explain|describe)/i,
+              /^(how did you|what did you|why did you|when did you|where did you)/i,
+              /^(let's|also,|for (example|instance)|you('ve| have) (also )?mentioned)/i,
+              /^(you mentioned|you're (currently )?pursuing|you're taking)/i,
+              /\?$/,  // Ends with question mark
+            ];
+            
+            // Check if transcript matches typical AI question patterns
+            const looksLikeAIQuestion = aiQuestionPatterns.some(pattern => pattern.test(transcript));
+            
+            if (looksLikeAIQuestion) {
+              console.log('🚫 BLOCKED: Transcript matches AI question pattern');
+              console.log('   Pattern detected in:', transcript.substring(0, 80) + '...');
+              setPhaseStatus('');
+              return;
+            }
+            
+            // ULTRA-CRITICAL FILTER 2: If transcript is long (>100 chars), likely AI speech
+            if (transcript.length > 100) {
+              console.log('🚫 BLOCKED: Transcript too long (likely AI speech, not user)');
+              console.log('   Length:', transcript.length, 'chars');
+              setPhaseStatus('');
+              return;
+            }
+            
+            // CRITICAL FILTER 3: Calculate exact similarity with AI question
+            if (lastAIQuestion && lastAIQuestion.length > 15) {
+              const similarity = calculateTextSimilarity(transcript, lastAIQuestion);
+              console.log(`📊 Transcript similarity to AI question: ${(similarity * 100).toFixed(1)}%`);
+              
+              // ULTRA-STRICT BLOCKING: If >10% similar, it's AI speech echo
+              if (similarity > 0.10) {
+                console.log('🚫 BLOCKED: Transcript too similar to AI question');
+                console.log('   AI Question:', lastAIQuestion.substring(0, 80) + '...');
+                console.log('   Transcript:', transcript.substring(0, 80) + '...');
+                setPhaseStatus('');
+                return;
+              }
+              
+              // Check if transcript contains significant portion of AI question
+              const transcriptLower = transcript.toLowerCase();
+              const aiLower = lastAIQuestion.toLowerCase();
+              
+              // If AI question is contained in transcript or vice versa
+              if (transcriptLower.includes(aiLower.substring(0, Math.min(40, aiLower.length))) ||
+                  aiLower.includes(transcriptLower.substring(0, Math.min(40, transcriptLower.length)))) {
+                console.log('🚫 BLOCKED: Transcript contains AI question text');
+                setPhaseStatus('');
+                return;
+              }
+            }
+            
+            // FILTER 4: Strip any AI question prefix if embedded
+            if (lastAIQuestion && lastAIQuestion.length > 15 && transcript.length > 50) {
+              const aiQuestionLower = lastAIQuestion.toLowerCase();
+              const transcriptLower = transcript.toLowerCase();
+              
+              // Find where AI question ends in transcript
+              const aiWords = aiQuestionLower.split(/\s+/);
+              for (let i = Math.min(aiWords.length, 20); i >= 5; i--) {
+                const aiPrefix = aiWords.slice(0, i).join(' ');
+                const aiPrefixIndex = transcriptLower.indexOf(aiPrefix);
+                
+                if (aiPrefixIndex !== -1) {
+                  // Found AI question in transcript - strip everything before user's actual answer
+                  const strippedTranscript = transcript.substring(aiPrefixIndex + aiPrefix.length).trim();
+                  console.log('✂️ STRIPPED AI question from transcript');
+                  console.log('   Original length:', transcript.length);
+                  console.log('   Stripped length:', strippedTranscript.length);
+                  transcript = strippedTranscript;
+                  break;
+                }
+              }
+            }
+            
+            // FILTER 5: Reject very short or empty transcripts
+            const wordCount = transcript.split(/\s+/).filter(w => w.length > 0).length;
+            if (wordCount <= 2 || transcript.length < 3) {
+              console.log('🔇 Filtered: Too short or empty after processing:', transcript);
+              setPhaseStatus('');
+              return;
+            }
+            
+            // FILTER 6: Enhanced keyboard noise and gibberish patterns
+            const keyboardPatterns = [
+              'mask', 'click', 'clack', 'tap', 'type', 'keyboard',
+              'the', 'and', 'of', 'to', 'a', 'in', 'is', 'that',
+              'can', 'you', 'this', 'is', 'oh', 'see', 'get'
+            ];
+            
+            // Check for gibberish (random characters/foreign words)
+            const gibberishPatterns = /entsprechende|[äöüß]|\b\w{15,}\b/i;
+            if (gibberishPatterns.test(transcript)) {
+              console.log('🔇 Filtered gibberish/foreign text:', transcript);
+              setPhaseStatus('');
+              return;
+            }
+            
+            const words = transcript.toLowerCase().split(/\s+/);
+            const isKeyboardNoise = words.length <= 3 && words.every(word => 
+              keyboardPatterns.includes(word.toLowerCase())
+            );
+            
+            if (isKeyboardNoise) {
+              console.log('🔇 Filtered keyboard noise:', transcript);
+              setPhaseStatus('');
+              return;
+            }
+            
+            // FILTER 7: Word overlap ratio
+            if (lastAIQuestion && lastAIQuestion.length > 20) {
+              const aiWords = lastAIQuestion.toLowerCase()
+                .split(/\s+/)
+                .filter(w => w.length > 3);
+              
+              const transcriptWords = transcript.toLowerCase()
+                .split(/\s+/)
+                .filter(w => w.length > 3);
+              
+              const matchingWords = transcriptWords.filter(word => aiWords.includes(word));
+              const matchRatio = transcriptWords.length > 0 ? matchingWords.length / transcriptWords.length : 0;
+              
+              if (matchRatio > 0.5) {
+                console.log(`🔇 Filtered: ${(matchRatio * 100).toFixed(0)}% word overlap with AI question`);
+                setPhaseStatus('');
+                return;
+              }
+            }
+            
+            // Only add valid transcripts that pass ALL filters
+            console.log('✅ VALID USER RESPONSE:', transcript);
+            addLog('You: ' + transcript);
           }
-          setAnswer(msg.transcript || '');
           setPhaseStatus('');
         } else if (msg.type === 'no_speech') {
           // Don't show "NO SPEECH:" in chat - only reset phase
+          console.log('🤫 No speech detected by backend');
+          console.log('⚠️ Backend heard silence or could not transcribe audio');
+          console.log('💡 TIP: Speak louder and clearer after you see "Listening..."');
           setPhaseStatus('');
         } else if (msg.type === 'invalid_transcript') {
           // Don't show "INVALID:" in chat - only reset phase
+          console.log('⚠️ Invalid transcript received from backend');
           setPhaseStatus('');
         } else if (msg.type === 'ended') {
           // Don't show "ENDED" in chat
@@ -367,9 +735,14 @@ export default function ResumeInterviewPage() {
           addLog('MSG: ' + ev.data);
         }
       } catch (e) {
+        console.error('❌ Error parsing WebSocket message:', e, ev.data);
         addLog(ev.data);
       }
     };
+    } catch (e) {
+      console.error('❌ WebSocket connection error:', e);
+      setIsConnecting(false);
+    }
   };
 
   const disconnectWebSocket = () => {
@@ -438,61 +811,208 @@ export default function ResumeInterviewPage() {
   };
 
   const initResumeInterview = () => {
+    console.log('🚀 initResumeInterview called, resumeId:', resumeId);
+    
+    // CRITICAL: Reset all input states before starting interview
+    setAnswer('');
+    setCode('');
+    setIsTyping(false);
+    setBlockVAD(false);
+    setPhaseStatus('');
+    
+    // Force React to update and verify textarea is clear
+    setTimeout(() => {
+      const textarea = document.querySelector('textarea[placeholder*="response"]') as HTMLTextAreaElement;
+      if (textarea && textarea.value.trim().length > 0) {
+        console.warn('⚠️ Textarea not empty after init, forcing clear');
+        textarea.value = '';
+        setAnswer('');
+      }
+    }, 100);
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      // Don't show "Connect WS first" in chat
+      console.error('❌ WebSocket not connected. State:', wsRef.current?.readyState);
+      // Don't add error to chat - silently fail and retry connection
+      if (!isConnecting) {
+        connectWebSocket();
+      }
       return;
     }
     if (!resumeId) {
+      console.error('❌ No resume ID');
       addLog('Upload resume first');
       return;
     }
-    wsRef.current.send(JSON.stringify({ 
+    
+    const initMessage = { 
       type: 'init', 
       mode: 'resume', 
       resume_id: resumeId 
-    }));
-    addLog('Init (resume)');
-    setInterviewStarted(true);
-    // Auto-start camera when interview begins
-    startCamera();
+    };
+    
+    console.log('📤 Sending init message:', initMessage);
+    try {
+      wsRef.current.send(JSON.stringify(initMessage));
+      addLog('Init (resume)');
+      setInterviewStarted(true);
+      // Auto-start camera when interview begins
+      startCamera();
+    } catch (e) {
+      console.error('Failed to send init message:', e);
+      setIsConnected(false);
+      connectWebSocket();
+    }
   };
 
   const sendAnswer = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addLog('Connect WS first');
+      console.error('Cannot send answer - WebSocket not connected');
+      // Try to reconnect
+      if (!isConnecting) {
+        connectWebSocket();
+      }
       return;
     }
-    if (!answer.trim()) {
-      addLog('Answer empty');
+    
+    const userAnswer = answer.trim();
+    if (!userAnswer) {
+      console.log('⚠️ Empty answer, not sending');
       return;
     }
-    wsRef.current.send(JSON.stringify({ 
-      type: 'answer', 
-      text: answer 
-    }));
-    setAnswer('');
+    
+    // VALIDATION 1: Get last AI question for comparison
+    const lastLog = logs[logs.length - 1] || '';
+    const lastAIQuestion = lastLog.startsWith('Q:') ? lastLog.replace('Q: ', '').trim() : '';
+    
+    let cleanedAnswer = userAnswer;
+    
+    // VALIDATION 2: Check if answer contains or matches AI question
+    if (lastAIQuestion && lastAIQuestion.length > 20) {
+      // Check for exact prefix match (first 50 chars)
+      const aiPrefix = lastAIQuestion.substring(0, 50).toLowerCase().trim();
+      const answerPrefix = userAnswer.substring(0, Math.min(50, userAnswer.length)).toLowerCase().trim();
+      
+      // If answer starts with AI question, remove it
+      if (answerPrefix === aiPrefix || answerPrefix.includes(aiPrefix)) {
+        console.log('⚠️ Removing AI question prefix from answer');
+        cleanedAnswer = userAnswer.replace(new RegExp('^' + lastAIQuestion.substring(0, 100), 'i'), '').trim();
+      }
+      
+      // VALIDATION 3: Calculate similarity to detect if user copied AI question
+      const similarity = calculateTextSimilarity(cleanedAnswer.length > 0 ? cleanedAnswer : userAnswer, lastAIQuestion);
+      console.log(`📊 Answer similarity to AI question: ${(similarity * 100).toFixed(1)}%`);
+      
+      if (similarity > 0.7) { // 70% or more similar
+        console.log('❌ REJECTED: Answer is too similar to AI question (likely copied)');
+        setAnswer('');
+        setPhaseStatus('⚠️ Please provide your own answer, not the question');
+        setTimeout(() => setPhaseStatus(''), 3000);
+        return;
+      }
+    }
+    
+    // VALIDATION 4: Final check - answer shouldn't be empty after cleaning
+    if (!cleanedAnswer || cleanedAnswer.length < 2) {
+      console.log('⚠️ Answer empty or too short after cleaning');
+      setAnswer('');
+      return;
+    }
+    
+    // Show cleaned answer in chat immediately
+    addLog('You: ' + cleanedAnswer);
+    console.log('✅ Sending valid answer:', cleanedAnswer.substring(0, 50) + '...');
+    
+    try {
+      wsRef.current.send(JSON.stringify({ 
+        type: 'answer', 
+        text: cleanedAnswer 
+      }));
+      
+      // CRITICAL: Clear textarea immediately after sending
+      setAnswer('');
+      setIsTyping(false);
+      setBlockVAD(false);
+    } catch (e) {
+      console.error('Failed to send answer:', e);
+      setIsConnected(false);
+    }
+  };
+
+  // Handle answer input change with typing detection
+  const handleAnswerChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    
+    // CRITICAL CHECK: Detect if user is copying AI's question
+    const lastLog = logs[logs.length - 1] || '';
+    const lastAIQuestion = lastLog.startsWith('Q:') ? lastLog.replace('Q: ', '').trim() : '';
+    
+    if (lastAIQuestion && lastAIQuestion.length > 20 && value.length > 20) {
+      // Check if value closely matches AI question (first 40 chars)
+      const aiStart = lastAIQuestion.substring(0, 40).toLowerCase().trim();
+      const valueStart = value.substring(0, 40).toLowerCase().trim();
+      
+      // If user typed text matches AI question start exactly
+      if (valueStart === aiStart) {
+        console.log('⚠️ BLOCKED: User appears to be copying AI question');
+        setAnswer('');
+        // Show brief warning without disrupting flow
+        setPhaseStatus('⚠️ Please type your own response');
+        setTimeout(() => setPhaseStatus(''), 2000);
+        return;
+      }
+    }
+    
+    setAnswer(value);
+    
+    // IMMEDIATELY block VAD when typing starts
+    setBlockVAD(true);
+    setIsTyping(true);
+    console.log('⛔ VAD BLOCKED - User is typing');
+    
+    // Clear previous timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    // Clear typing state after 2 seconds of inactivity (reduced for faster voice)
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      setBlockVAD(false);
+      console.log('✅ VAD unblocked - Typing stopped');
+    }, 2000); // 2 seconds - faster response
   };
 
   const submitCode = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addLog('Connect WS first');
+      console.error('Cannot submit code - WebSocket not connected');
+      // Try to reconnect
+      if (!isConnecting) {
+        connectWebSocket();
+      }
       return;
     }
     if (!code.trim()) {
-      addLog('Code empty');
       return;
     }
     
-    addLog('A: [Code Submitted]');
+    // Show code submission in chat with preview
+    const preview = code.length > 100 ? code.substring(0, 100) + '...' : code;
+    addLog('You: [Code] ' + preview);
     setPhaseStatus('AI is analyzing your code...');
     
-    wsRef.current.send(JSON.stringify({ 
-      type: 'code_submission', 
-      code: code 
-    }));
-    setCode('');
-    setShowCodeEditor(false);
-    setIsCodeMode(false);
+    try {
+      wsRef.current.send(JSON.stringify({ 
+        type: 'code_submission', 
+        code: code 
+      }));
+      setCode('');
+      setShowCodeEditor(false);
+      setIsCodeMode(false);
+    } catch (e) {
+      console.error('Failed to submit code:', e);
+      setIsConnected(false);
+      setPhaseStatus('');
+    }
   };
 
   const endInterview = () => {
@@ -502,14 +1022,33 @@ export default function ResumeInterviewPage() {
       window.speechSynthesis.pause();
     }
 
+    // Set ending flag to prevent reconnection
+    setIsEndingInterview(true);
+    
     // Send end interview message to backend
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'end' }));
+      try {
+        wsRef.current.send(JSON.stringify({ type: 'end' }));
+      } catch (e) {
+        console.error('Failed to send end message:', e);
+      }
     }
     
-    // Show loading screen IMMEDIATELY
-    setIsEndingInterview(true);
+    // Stop camera
     stopCamera();
+    
+    // Clear all input states
+    setAnswer('');
+    setCode('');
+    setShowCodeEditor(false);
+    setIsCodeMode(false);
+    setPhaseStatus('');
+    
+    // Clear reconnection timer
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     
     // Save minimal session data to localStorage (avoid quota exceeded error)
     const sessionData = {
@@ -531,7 +1070,6 @@ export default function ResumeInterviewPage() {
     
     // ONE SINGLE TIMEOUT: Exactly 2.5 seconds total
     endTimeoutRef.current = setTimeout(() => {
-      setIsEndingInterview(false);
       setInterviewCompleted(true);
       
       // Close WebSocket immediately (no extra timeout)
@@ -540,6 +1078,7 @@ export default function ResumeInterviewPage() {
         wsRef.current = null;
       }
       setIsConnected(false);
+      setIsEndingInterview(false);
       
       // Clear timeout ref
       endTimeoutRef.current = null;
@@ -574,12 +1113,19 @@ export default function ResumeInterviewPage() {
 
   useEffect(() => {
     return () => {
+      // Cleanup WebSocket
       if (wsRef.current) {
         wsRef.current.close();
       }
-      // Cleanup timeout on unmount
+      // Cleanup all timeouts
       if (endTimeoutRef.current) {
         clearTimeout(endTimeoutRef.current);
+      }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
       }
     };
   }, []);
@@ -1106,70 +1652,101 @@ export default function ResumeInterviewPage() {
 
   // Interview Console View
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
-      <div className="flex-1 flex">
-      {/* Main Video Area - Left Side */}
-      <div className="flex-1 relative" style={{ width: `calc(100% - ${chatPanelWidth}px)` }}>
-        {/* Background: user's camera video (full screen) */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden">
+    <div className="bg-gray-900 flex flex-col" style={{ height: '100vh', overflow: 'hidden', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+      {/* Main container: Use flex-col on mobile for vertical stacking, flex-row on desktop */}
+      <div className={`flex ${isMobile ? 'flex-col h-full' : 'flex-1'} overflow-hidden`}>
+      {/* Main Video Area - ABSOLUTELY FIXED on mobile, no scroll */}
+      <div 
+        className={`
+          bg-gray-800
+          ${isMobile 
+            ? 'absolute top-0 left-0 right-0 z-10' 
+            : 'relative flex-1'
+          }
+        `}
+        style={{
+          ...(isMobile 
+            ? { 
+                height: '45vh',
+                touchAction: 'none',
+                overflow: 'hidden',
+                position: 'absolute'
+              } 
+            : { 
+                width: `calc(100% - ${showChatPanel ? chatPanelWidth : 0}px)`,
+                minHeight: '400px',
+                position: 'relative'
+              }
+          )
+        }}
+      >
+        {/* Background: user's camera video (full screen) - prevent zoom */}
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900" style={{ touchAction: 'none' }}>
           {isCameraOn && cameraStream ? (
             <video
               ref={videoRef}
               autoPlay
               muted
               playsInline
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain bg-black"
+              style={{ 
+                pointerEvents: 'none',
+                transform: 'scale(1.0)',
+                transformOrigin: 'center center',
+                touchAction: 'none'
+              }}
               onLoadedData={() => console.log('Video loaded')}
               onError={(e) => console.error('Video error:', e)}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center text-white">
-                <div className="mb-8">
-                  <div className="w-32 h-32 mx-auto rounded-full bg-gray-700 flex items-center justify-center mb-4">
+              <div className="text-center text-white px-4">
+                <div className="mb-4 sm:mb-8">
+                  <div className="w-24 h-24 sm:w-32 sm:h-32 mx-auto rounded-full bg-gray-700 flex items-center justify-center mb-3 sm:mb-4">
                     {/* Simple person silhouette SVG as placeholder for user */}
                     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                       <circle cx="12" cy="8" r="3.6" fill="#CBD5E1" />
                       <path d="M4 20c0-3.3137 2.6863-6 6-6h4c3.3137 0 6 2.6863 6 6" fill="#E2E8F0" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl font-semibold mb-2">Interview in Progress</h2>
-                  <p className="text-gray-300">Having a conversation with CodeSage AI</p>
-                  <div className="mt-3 text-sm text-gray-200">You (camera off)</div>
+                  <h2 className="text-lg sm:text-2xl font-semibold mb-1 sm:mb-2">Interview in Progress</h2>
+                  <p className="text-sm sm:text-base text-gray-300">Having a conversation with CodeSage AI</p>
+                  <div className="mt-2 sm:mt-3 text-xs sm:text-sm text-gray-200">You (camera off)</div>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Minimized AI Tile (top-right) */}
-        <div className="absolute top-6 right-6 z-30">
-          <div className="w-40 h-24 rounded-xl overflow-hidden bg-white/10 backdrop-blur-sm border border-white/10 shadow-lg flex items-center">
-            <div className="w-24 h-full bg-gradient-to-br from-purple-600 to-cyan-500 flex items-center justify-center">
-              <div className="text-white font-bold text-2xl">AI</div>
+        {/* Minimized AI Tile (top-right) - Responsive */}
+        <div className={`absolute ${isMobile ? 'top-3 right-3' : 'top-6 right-6'} z-30`}>
+          <div className={`${isMobile ? 'w-32 h-20' : 'w-40 h-24'} rounded-xl overflow-hidden bg-white/10 backdrop-blur-sm border border-white/10 shadow-lg flex items-center`}>
+            <div className={`${isMobile ? 'w-20' : 'w-24'} h-full bg-gradient-to-br from-purple-600 to-cyan-500 flex items-center justify-center`}>
+              <div className={`text-white font-bold ${isMobile ? 'text-lg' : 'text-2xl'}`}>AI</div>
             </div>
             <div className="flex-1 p-2">
-              <div className="text-sm text-white font-semibold">CodeSage</div>
-              <div className="text-xs text-white/80">Virtual Interviewer</div>
+              <div className={`${isMobile ? 'text-xs' : 'text-sm'} text-white font-semibold`}>CodeSage</div>
+              <div className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-white/80`}>Virtual Interviewer</div>
             </div>
           </div>
         </div>
 
-        {/* Bottom Controls Bar */}
-        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex items-center space-x-4 bg-black/40 backdrop-blur-md rounded-full px-6 py-3 shadow-xl">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={toggleCamera}
-            aria-label={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
-            className={`p-3 rounded-full transition-colors ${
-              isCameraOn 
-                ? 'bg-green-600 hover:bg-green-700 text-white' 
-                : 'bg-gray-600 hover:bg-gray-500 text-white'
-            }`}
-          >
+        {/* Bottom Controls Bar - Responsive */}
+        <div className={`absolute ${isMobile ? 'bottom-4 left-1/2 transform -translate-x-1/2 flex-col space-y-2' : 'bottom-6 left-1/2 transform -translate-x-1/2 flex space-x-4'} bg-black/40 backdrop-blur-md rounded-full ${isMobile ? 'px-4 py-2' : 'px-6 py-3'} shadow-xl`}>
+          <div className={`flex ${isMobile ? 'space-x-2' : 'space-x-4'}`}>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={toggleCamera}
+              aria-label={isCameraOn ? 'Turn camera off' : 'Turn camera on'}
+              className={`${isMobile ? 'p-2' : 'p-3'} rounded-full transition-colors min-h-[50px] min-w-[50px] flex items-center justify-center touch-manipulation ${
+                isCameraOn 
+                  ? 'bg-green-600 hover:bg-green-700 text-white' 
+                  : 'bg-gray-600 hover:bg-gray-500 text-white'
+              }`}
+            >
             {/* Show Camera icon when camera is ON (indicates live), and CameraOff when OFF */}
-            {isCameraOn ? <Camera className="w-5 h-5" /> : <CameraOff className="w-5 h-5" />}
+            {isCameraOn ? <Camera className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} /> : <CameraOff className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />}
           </motion.button>
           
           <motion.button
@@ -1177,75 +1754,130 @@ export default function ResumeInterviewPage() {
             whileTap={{ scale: isEndingInterview ? 1 : 0.95 }}
             onClick={endInterview}
             disabled={isEndingInterview}
-            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+            className={`bg-red-600 hover:bg-red-700 text-white ${isMobile ? 'px-4 py-2 text-sm' : 'px-6 py-3'} rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 min-h-[50px] touch-manipulation`}
           >
             {isEndingInterview ? 'Ending...' : 'End Interview'}
           </motion.button>
         </div>
+        </div>
 
-        {/* Top Header Bar */}
-        <div className="absolute top-0 left-0 right-0 p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3 bg-black/50 backdrop-blur-md rounded-full px-4 py-2">
-              <FileText className="w-5 h-5 text-purple-400" />
-              <span className="text-white font-medium">CodeSage - Resume Interview</span>
+        {/* Top Header Bar - Responsive */}
+        <div className={`absolute top-0 left-0 right-0 ${isMobile ? 'p-3' : 'p-6'}`}>
+          <div className={`flex items-center ${isMobile ? 'flex-col space-y-2' : 'justify-between'}`}>
+            <div className={`flex items-center ${isMobile ? 'space-x-2' : 'space-x-3'} bg-black/50 backdrop-blur-md rounded-full ${isMobile ? 'px-3 py-1.5' : 'px-4 py-2'}`}>
+              <FileText className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-purple-400`} />
+              <span className={`text-white font-medium ${isMobile ? 'text-sm' : ''}`}>CodeSage - Resume Interview</span>
             </div>
             
-            <div className="flex items-center space-x-2 bg-purple-500/20 backdrop-blur-md rounded-full px-3 py-2">
-              <CheckCircle className="w-4 h-4 text-purple-400" />
-              <span className="text-purple-300 text-sm font-medium">AI Connected</span>
+            <div className={`flex items-center space-x-2 bg-purple-500/20 backdrop-blur-md rounded-full ${isMobile ? 'px-2 py-1' : 'px-3 py-2'}`}>
+              <CheckCircle className={`${isMobile ? 'w-3 h-3' : 'w-4 h-4'} text-purple-400`} />
+              <span className={`text-purple-300 ${isMobile ? 'text-xs' : 'text-sm'} font-medium`}>AI Connected</span>
             </div>
           </div>
         </div>
 
-        {/* User Name Label */}
-        <div className="absolute bottom-20 left-6">
-          <div className="bg-black/60 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-sm font-medium">
+        {/* User Name Label - Responsive */}
+        <div className={`absolute ${isMobile ? 'bottom-20' : 'bottom-20'} ${isMobile ? 'left-3' : 'left-6'}`}>
+          <div className={`bg-black/60 backdrop-blur-sm text-white ${isMobile ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm'} rounded-lg font-medium`}>
             You
           </div>
         </div>
+
+        {/* Phase Status Indicator */}
+        {phase && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`absolute ${isMobile ? 'top-20 left-1/2 -translate-x-1/2' : 'top-24 left-1/2 -translate-x-1/2'} bg-cyan-500/20 backdrop-blur-sm ${isMobile ? 'px-3 py-1.5' : 'px-4 py-2'} rounded-full border border-cyan-500/30 z-20`}
+          >
+            <p className={`text-cyan-300 ${isMobile ? 'text-xs' : 'text-sm'} font-medium`}>{phase}</p>
+          </motion.div>
+        )}
+        
+        {/* VAD Blocked Indicator - Show when typing */}
+        {(isTyping || blockVAD) && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`absolute ${isMobile ? 'top-32 left-1/2 -translate-x-1/2' : 'top-36 left-1/2 -translate-x-1/2'} bg-yellow-500/20 backdrop-blur-sm ${isMobile ? 'px-3 py-1.5' : 'px-4 py-2'} rounded-full border border-yellow-500/30 z-20`}
+          >
+            <p className={`text-yellow-300 ${isMobile ? 'text-xs' : 'text-sm'} font-medium flex items-center ${isMobile ? 'gap-1' : 'gap-2'}`}>
+              <span>⛔</span>
+              <span>Voice Input Paused - Typing</span>
+            </p>
+          </motion.div>
+        )}
       </div>
 
-      {/* Resize Handle */}
-      <div
-        ref={resizeRef}
-        onMouseDown={handleMouseDown}
-        className={`w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors ${
-          isResizing ? 'bg-blue-500' : ''
-        }`}
-      />
+      {/* Resize Handle - Hide on mobile */}
+      {!isMobile && (
+        <div
+          ref={resizeRef}
+          onMouseDown={handleMouseDown}
+          className={`w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors ${
+            isResizing ? 'bg-blue-500' : ''
+          }`}
+        />
+      )}
 
-      {/* Right Side - Chat Transcript Panel */}
-      <div className="bg-white flex flex-col" style={{ width: `${chatPanelWidth}px` }}>
-        {/* Chat Header */}
-        <div className="p-4 border-b border-gray-200 flex-shrink-0">
+      {/* Right Side - Chat Transcript Panel - Positioned below video on mobile */}
+      <div 
+        className={`
+          bg-white flex flex-col
+          ${isMobile 
+            ? 'absolute bottom-0 left-0 right-0 border-t-2 border-gray-300 shadow-lg' 
+            : 'relative border-l border-gray-300'
+          }
+        `}
+        style={{
+          ...(isMobile 
+            ? { 
+                top: '45vh',
+                height: '55vh',
+                overflow: 'hidden'
+              } 
+            : { 
+                width: `${chatPanelWidth}px`
+              }
+          )
+        }}
+      >
+        {/* Chat Header - Responsive */}
+        <div className={`${isMobile ? 'p-3 pb-2' : 'p-4'} border-b border-gray-200 flex-shrink-0`}>
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Live Transcript</h3>
-            {phase && (
-              <div className="flex items-center space-x-2 text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
-                {phase === 'Listening...' && <Loader2 className="w-4 h-4 animate-spin" />}
-                {phase === 'Speaking...' && <Mic className="w-4 h-4" />}
-                <span>{phase}</span>
-              </div>
-            )}
+            <div className="flex items-center space-x-2">
+              <MessageSquare className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-purple-600`} />
+              <h3 className={`${isMobile ? 'text-base' : 'text-lg'} font-semibold text-gray-900`}>Live Transcript</h3>
+            </div>
+            <div className="flex items-center space-x-2">
+              {phase && (
+                <div className={`flex items-center space-x-1.5 ${isMobile ? 'text-xs px-2 py-1' : 'text-sm px-3 py-1.5'} text-blue-600 bg-blue-50 rounded-full font-medium`}>
+                  {phase === 'Listening...' && <Loader2 className={`${isMobile ? 'w-3 h-3' : 'w-4 h-4'} animate-spin`} />}
+                  {phase === 'Speaking...' && <Mic className={`${isMobile ? 'w-3 h-3' : 'w-4 h-4'}`} />}
+                  <span>{phase}</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Chat Messages - Responsive */}
+        <div className={`flex-1 overflow-y-auto ${isMobile ? 'p-3' : 'p-4'} ${isMobile ? 'space-y-3' : 'space-y-4'}`}>
           {logs.map((log, index) => {
+            // Determine message type - ONLY messages starting with "You:" are user messages
+            const isUser = log.startsWith('You:');
             const isQuestion = log.startsWith('Q:');
             const isEvaluation = log.startsWith('Evaluation:');
             const isHint = log.startsWith('Hint:');
-            const isTranscribed = log.startsWith('TRANSCRIBED:');
-            const isUser = isTranscribed;
+            const isSystem = log.startsWith('MSG:') || log.startsWith('Init');
             
             // Clean up the message text
             let cleanMessage = log;
             if (isQuestion) cleanMessage = log.replace('Q: ', '');
             if (isEvaluation) cleanMessage = log.replace('Evaluation: ', '');
             if (isHint) cleanMessage = log.replace('Hint: ', '');
-            if (isTranscribed) cleanMessage = log.replace('TRANSCRIBED: ', '');
+            if (isUser) cleanMessage = log.replace('You: ', '');
+            if (isSystem && log.startsWith('MSG: ')) cleanMessage = log.replace('MSG: ', '');
 
             return (
               <motion.div
@@ -1255,22 +1887,24 @@ export default function ResumeInterviewPage() {
                 transition={{ delay: index * 0.05 }}
                 className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
               >
-                <div className={`max-w-xs px-4 py-2 rounded-2xl ${
+                <div className={`${isMobile ? 'max-w-[85%]' : 'max-w-xs'} ${isMobile ? 'px-3 py-2' : 'px-4 py-3'} rounded-2xl shadow-sm ${
                   isUser 
-                    ? 'bg-cyan-600 text-white ml-auto shadow-md' 
-                    : 'bg-gray-100 text-gray-900'
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white ml-auto' 
+                    : 'bg-gray-100 text-gray-900 border border-gray-200'
                 }`}>
-                  {!isUser && (
-                    <div className="text-xs text-gray-500 mb-1 font-medium">
-                      Alex
+                  {/* Show "AI Interviewer" label for AI messages (not user, not system) */}
+                  {!isUser && !isSystem && (
+                    <div className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-gray-600 mb-1 font-semibold`}>
+                      AI Interviewer
                     </div>
                   )}
-                  <p className={`text-sm ${isUser ? 'text-white' : 'text-gray-900'}`}>
+                  <p className={`${isMobile ? 'text-xs' : 'text-sm'} ${isUser ? 'text-white' : 'text-gray-900'} break-words`}>
                     {cleanMessage}
                   </p>
+                  {/* Show "You" label for user messages */}
                   {isUser && (
-                    <div className="text-xs text-blue-100 mt-1 text-right">
-                      Aaron Wang
+                    <div className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-cyan-100 mt-1 text-right opacity-80`}>
+                      You
                     </div>
                   )}
                 </div>
@@ -1280,39 +1914,39 @@ export default function ResumeInterviewPage() {
           <div ref={logsEndRef} />
         </div>
 
-        {/* Message Input */}
-        <div className="p-4 border-t border-gray-200 flex-shrink-0">
+        {/* Message Input - Responsive */}
+        <div className={`${isMobile ? 'p-3' : 'p-4'} border-t border-gray-200 flex-shrink-0`}>
           {showCodeEditor ? (
             /* Code Editor Mode */
-            <div className="space-y-3">
+            <div className={`${isMobile ? 'space-y-2' : 'space-y-3'}`}>
               <div className="flex items-center space-x-2">
-                <Code2 className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-gray-700">Code Editor</span>
+                <Code2 className={`${isMobile ? 'w-3 h-3' : 'w-4 h-4'} text-blue-600`} />
+                <span className={`${isMobile ? 'text-xs' : 'text-sm'} font-medium text-gray-700`}>Code Editor</span>
               </div>
               <textarea
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="Write your code here..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm placeholder-gray-600 placeholder-opacity-100 text-gray-800"
-                rows={10}
+                className={`w-full ${isMobile ? 'px-2 py-1.5 text-xs' : 'px-3 py-2 text-sm'} border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono placeholder-gray-600 placeholder-opacity-100 text-gray-800`}
+                rows={isMobile ? 6 : 10}
                 style={{ fontFamily: 'Monaco, Consolas, "Lucida Console", monospace' }}
               />
-              <div className="flex space-x-2">
+              <div className={`flex ${isMobile ? 'flex-col space-y-2' : 'space-x-2'}`}>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={submitCode}
                   disabled={!code.trim()}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
+                  className={`${isMobile ? 'w-full px-3 py-2 text-sm' : 'px-4 py-2'} bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-h-[50px] touch-manipulation`}
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className={`${isMobile ? 'w-3 h-3' : 'w-4 h-4'}`} />
                   <span>Submit Code</span>
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setCode('')}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-colors"
+                  className={`${isMobile ? 'w-full px-3 py-2 text-sm' : 'px-4 py-2'} bg-gray-500 text-white rounded-lg font-medium hover:bg-gray-600 transition-colors min-h-[50px] touch-manipulation`}
                 >
                   Clear
                 </motion.button>
@@ -1320,28 +1954,78 @@ export default function ResumeInterviewPage() {
             </div>
           ) : (
             /* Regular Text Input Mode */
-            <div className="flex space-x-2">
-              <textarea
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Type your response..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm placeholder-gray-600 placeholder-opacity-100 text-gray-800"
-                rows={2}
-              />
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={sendAnswer}
-                disabled={!answer.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed self-end"
-              >
-                Send
-              </motion.button>
+            <div className={`${isMobile ? 'space-y-2' : 'space-y-2'}`}>
+              <div className={`flex ${isMobile ? 'space-x-2' : 'space-x-2'}`}>
+                <textarea
+                  value={answer}
+                  onChange={handleAnswerChange}
+                  onFocus={() => {
+                    console.log('⛔ Textarea focused - Blocking VAD immediately');
+                    setIsTyping(true);
+                    setBlockVAD(true); // Immediately block VAD when textarea gets focus
+                  }}
+                  onBlur={() => {
+                    console.log('👁️ Textarea blurred - Clearing typing state');
+                    // Clear typing state and timeout on blur
+                    if (typingTimeoutRef.current) {
+                      clearTimeout(typingTimeoutRef.current);
+                      typingTimeoutRef.current = null;
+                    }
+                    setIsTyping(false);
+                    // Don't immediately unblock - wait a moment to be safe
+                    setTimeout(() => {
+                      setBlockVAD(false);
+                      console.log('✅ VAD unblocked after blur delay');
+                    }, 1000);
+                  }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && answer.trim()) {
+                      e.preventDefault();
+                      sendAnswer();
+                    }
+                  }}
+                  placeholder="Type your response..."
+                  className={`flex-1 ${isMobile ? 'px-3 py-2.5 text-base min-h-[44px]' : 'px-3 py-2 text-sm'} border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none placeholder-gray-500 text-gray-800`}
+                  rows={isMobile ? 1 : 2}
+                />
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={sendAnswer}
+                  disabled={!answer.trim()}
+                  className={`${isMobile ? 'px-4' : 'px-4 py-2'} bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-lg font-medium hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed self-end min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation shadow-sm`}
+                >
+                  <Send className="w-5 h-5" />
+                </motion.button>
+              </div>
+              
+              {/* Visual Warning: Show if answer is suspiciously similar to AI question */}
+              {answer.trim().length > 20 && logs.length > 0 && (() => {
+                const lastLog = logs[logs.length - 1] || '';
+                const lastAIQuestion = lastLog.startsWith('Q:') ? lastLog.replace('Q: ', '').trim() : '';
+                
+                if (lastAIQuestion && lastAIQuestion.length > 20) {
+                  const similarity = calculateTextSimilarity(answer, lastAIQuestion);
+                  if (similarity > 0.4) { // 40% or more similar - show warning
+                    return (
+                      <motion.div
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`${isMobile ? 'text-xs px-2 py-1.5' : 'text-sm px-3 py-2'} text-amber-600 flex items-center gap-1.5 bg-amber-50 rounded border border-amber-200`}
+                      >
+                        <span>⚠️</span>
+                        <span className="font-medium">Make sure you're typing your own response, not the question</span>
+                      </motion.div>
+                    );
+                  }
+                }
+                return null;
+              })()}
             </div>
           )}
         </div>
       </div>
-      </div>
     </div>
+  </div>
   );
 }

@@ -71,10 +71,16 @@ def get_user_topics():
     return chosen
 
 def record_with_vad(filename="answer.wav"):
-    print("Listening for speech...")
-    vad = webrtcvad.Vad(3)  # Lower aggressiveness for better detection
+    print("🎤 Listening for speech...")
+    vad = webrtcvad.Vad(1)  # REDUCED aggressiveness: 0 (least) to 3 (most) - using 1 for better detection
     
     p = pyaudio.PyAudio()
+    
+    # Log device info
+    device_info = p.get_default_input_device_info()
+    print(f"📌 Using device: {device_info['name']}")
+    print(f"📊 Sample rate: {SAMPLE_RATE} Hz, Frame size: {FRAME_SIZE}")
+    
     stream = p.open(format=FORMAT,
                     channels=CHANNELS,
                     rate=SAMPLE_RATE,
@@ -83,37 +89,61 @@ def record_with_vad(filename="answer.wav"):
     
     frames = []
     silence_count = 0
+    speech_count = 0
     speech_started = False
     max_silence = 60  # ~1.8s of silence to stop
+    min_speech_frames = 5  # Need at least 5 speech frames (~150ms) to start recording
+    
+    print("🔴 READY - Please speak now!")
     
     try:
         while True:
             audio_chunk = stream.read(FRAME_SIZE, exception_on_overflow=False)
+            
+            # Calculate audio level for debugging
+            import numpy as np
+            audio_np = np.frombuffer(audio_chunk, dtype=np.int16)
+            max_amplitude = np.max(np.abs(audio_np))
+            rms = np.sqrt(np.mean(audio_np.astype(float)**2))
+            
             is_speech = vad.is_speech(audio_chunk, SAMPLE_RATE)
             
             if is_speech:
-                print("Speech detected")
-                frames.append(audio_chunk)
+                speech_count += 1
                 silence_count = 0
-                speech_started = True
+                
+                # Only mark as "speech started" after consecutive speech frames
+                if not speech_started and speech_count >= min_speech_frames:
+                    speech_started = True
+                    print(f"🗣️  SPEECH STARTED (level: {max_amplitude}, rms: {rms:.0f})")
+                elif speech_started:
+                    print(f"🗣️  Speech (level: {max_amplitude})")
+                else:
+                    print(f"🔊 Detecting speech... ({speech_count}/{min_speech_frames})")
+                
+                frames.append(audio_chunk)
             else:
-                print("Silence detected")
+                speech_count = 0
                 silence_count += 1
+                
+                if silence_count % 30 == 0:  # Log every ~1 second
+                    print(f"🤫 Silence... ({silence_count}/200 before timeout, level: {max_amplitude})")
+                
                 if speech_started:  # Only add silence frames after speech has started
                     frames.append(audio_chunk)
             
             # Stop recording after speech has started and enough silence is detected
             if speech_started and silence_count > max_silence:
-                print("Silence threshold reached, stopping recording.")
+                print(f"✅ Silence threshold reached ({silence_count} frames), stopping recording.")
                 break
                 
             # Safety break - don't record forever if no speech detected
             if not speech_started and silence_count > 200:
-                print("No speech detected for too long, stopping.")
+                print(f"⏱️  No speech detected for too long ({silence_count} frames), stopping.")
                 break
                 
     except KeyboardInterrupt:
-        print("Recording stopped by user.")
+        print("⚠️  Recording stopped by user.")
     finally:
         stream.stop_stream()
         stream.close()
@@ -124,10 +154,15 @@ def record_with_vad(filename="answer.wav"):
         audio_data = b''.join(frames)
         # Convert to NumPy array for soundfile
         audio_np = np.frombuffer(audio_data, dtype=np.int16)
+        max_amplitude = np.max(np.abs(audio_np))
+        print(f"📼 Recording saved: {len(frames)} frames, max amplitude: {max_amplitude}")
         sf.write(filename, audio_np, SAMPLE_RATE)
         return filename, True
     else:
-        print("No audio recorded")
+        print("❌ No audio recorded - no frames captured")
+        # Create empty file
+        sf.write(filename, np.array([]), SAMPLE_RATE)
+        return filename, False
         # Create empty file
         sf.write(filename, np.array([]), SAMPLE_RATE)
         return filename, False
