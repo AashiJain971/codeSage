@@ -609,20 +609,20 @@ export default function ResumeInterviewPage() {
           </Link>
         </motion.div>
 
-        <div className="flex items-center justify-center min-h-screen p-4 sm:p-6 pt-16 sm:pt-20">
+        <div className="flex items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8 pt-16 sm:pt-20">
           <div className="max-w-4xl mx-auto text-center w-full">
             {/* Header */}
             <motion.div
               initial={{ opacity: 0, y: -30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.6 }}
-              className="mb-12"
+              className="mb-8 sm:mb-10 lg:mb-12 px-4 sm:px-0"
             >            
             <motion.h1
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3, duration: 0.8 }}
-              className="text-4xl font-bold text-gray-900 mb-4"
+              className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-3 sm:mb-4"
             >
               Resume-based{' '}
               <span className="bg-gradient-to-r from-purple-600 to-violet-600 bg-clip-text text-transparent">
@@ -634,7 +634,7 @@ export default function ResumeInterviewPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5, duration: 0.8 }}
-              className="text-xl text-gray-600 max-w-2xl mx-auto"
+              className="text-base sm:text-lg lg:text-xl text-gray-600 max-w-2xl mx-auto px-4 sm:px-0"
             >
               Upload your resume to get personalized questions based on your experience and projects
             </motion.p>
@@ -645,18 +645,18 @@ export default function ResumeInterviewPage() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7, duration: 0.6 }}
-            className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 sm:p-8 max-w-2xl mx-auto hover:shadow-2xl transition-all duration-300"
+            className="bg-white rounded-2xl lg:rounded-3xl shadow-xl border border-gray-100 p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto hover:shadow-2xl transition-all duration-300"
           >
-            <h3 className="text-2xl font-bold mb-8 flex items-center justify-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-violet-500 rounded-full flex items-center justify-center shadow-lg">
-                <FileText className="w-6 h-6 text-white" />
+            <h3 className="text-xl sm:text-2xl font-bold mb-6 sm:mb-8 flex flex-col sm:flex-row items-center justify-center space-y-2 sm:space-y-0 sm:space-x-3">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-full flex items-center justify-center shadow-lg flex-shrink-0">
+                <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
-              <span className="text-gray-900">Upload Your Resume</span>
+              <span className="text-gray-900 text-center sm:text-left">Upload Your Resume</span>
             </h3>
             
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {/* File Upload Area */}
-              <div className="relative border-2 border-dashed border-purple-200 rounded-xl p-8 text-center hover:border-purple-400 transition-all duration-300 bg-gradient-to-br from-purple-50/50 via-white to-violet-50/50 hover:shadow-md group">
+              <div className="relative border-2 border-dashed border-purple-200 rounded-xl p-6 sm:p-8 lg:p-10 text-center hover:border-purple-400 transition-all duration-300 bg-gradient-to-br from-purple-50/50 via-white to-violet-50/50 hover:shadow-md group">
                 <motion.div
                   animate={{ 
                     y: [0, -10, 0],
@@ -669,12 +669,12 @@ export default function ResumeInterviewPage() {
                   }}
                   className="relative z-10"
                 >
-                  <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-purple-100 to-violet-100 rounded-full flex items-center justify-center group-hover:from-purple-200 group-hover:to-violet-200 transition-all duration-300">
-                    <Upload className="w-10 h-10 text-purple-500 group-hover:text-purple-600 transition-colors duration-300" />
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 bg-gradient-to-br from-purple-100 to-violet-100 rounded-full flex items-center justify-center group-hover:from-purple-200 group-hover:to-violet-200 transition-all duration-300">
+                    <Upload className="w-8 h-8 sm:w-10 sm:h-10 text-purple-500 group-hover:text-purple-600 transition-colors duration-300" />
                   </div>
                 </motion.div>
                 
-                <div className="space-y-4 relative z-10">
+                <div className="space-y-3 sm:space-y-4 relative z-10">
                   <div>
                     <input
                       type="file"
@@ -685,18 +685,18 @@ export default function ResumeInterviewPage() {
                     />
                     <label 
                       htmlFor="resume-upload"
-                      className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-violet-700 cursor-pointer transition-all duration-200 shadow-sm hover:shadow-lg"
+                      className="inline-flex items-center space-x-2 px-5 py-3 sm:px-6 sm:py-3.5 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-lg sm:rounded-xl font-medium hover:from-purple-700 hover:to-violet-700 cursor-pointer transition-all duration-200 shadow-sm hover:shadow-lg text-sm sm:text-base min-h-[50px] touch-manipulation"
                     >
-                      <FileText className="w-5 h-5" />
+                      <FileText className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                       <span>Choose File</span>
                     </label>
                   </div>
                   
                   <div className="text-center">
-                    <p className="text-base font-medium text-gray-700 mb-1">
+                    <p className="text-sm sm:text-base font-medium text-gray-700 mb-1">
                       Upload your PDF resume (Max 10MB)
                     </p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-xs sm:text-sm text-gray-500 px-4 sm:px-0">
                       Drag & drop or click to browse • PDF format only
                     </p>
                   </div>
@@ -715,14 +715,14 @@ export default function ResumeInterviewPage() {
                   className="relative overflow-hidden bg-gradient-to-r from-purple-50 to-violet-50 rounded-xl border border-purple-200 hover:shadow-lg transition-all duration-300 group"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 to-violet-500/5"></div>
-                  <div className="relative p-6 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-lg flex items-center justify-center shadow-sm">
-                        <FileText className="w-6 h-6 text-white" />
+                  <div className="relative p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+                    <div className="flex items-center space-x-3 sm:space-x-4 min-w-0 flex-1">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0">
+                        <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                       </div>
-                      <div>
-                        <p className="font-medium text-gray-800 mb-1">{resumeFile.name}</p>
-                        <p className="text-sm text-gray-600">{(resumeFile.size / 1024 / 1024).toFixed(2)} MB • PDF Document</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-gray-800 mb-1 text-sm sm:text-base truncate">{resumeFile.name}</p>
+                        <p className="text-xs sm:text-sm text-gray-600">{(resumeFile.size / 1024 / 1024).toFixed(2)} MB • PDF Document</p>
                       </div>
                     </div>
                     <motion.button
@@ -730,16 +730,16 @@ export default function ResumeInterviewPage() {
                       whileTap={{ scale: 0.95 }}
                       onClick={uploadResume}
                       disabled={isUploading}
-                      className="px-6 py-3 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-violet-700 transition-all duration-200 disabled:from-purple-400 disabled:to-violet-400 disabled:cursor-not-allowed flex items-center space-x-2 shadow-sm hover:shadow-lg"
+                      className="w-full sm:w-auto px-5 py-3 sm:px-6 sm:py-3.5 bg-gradient-to-r from-purple-600 to-violet-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-violet-700 transition-all duration-200 disabled:from-purple-400 disabled:to-violet-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2 shadow-sm hover:shadow-lg text-sm sm:text-base min-h-[50px] touch-manipulation flex-shrink-0"
                     >
                       {isUploading ? (
                         <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin flex-shrink-0" />
                           <span>Uploading...</span>
                         </>
                       ) : (
                         <>
-                          <Upload className="w-5 h-5" />
+                          <Upload className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
                           <span>Upload Resume</span>
                         </>
                       )}
@@ -753,15 +753,15 @@ export default function ResumeInterviewPage() {
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-gradient-to-r from-purple-50 to-violet-50 rounded-xl p-6 border border-purple-200"
+                  className="bg-gradient-to-r from-purple-50 to-violet-50 rounded-xl p-4 sm:p-6 border border-purple-200"
                 >
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-gray-700 font-medium">Processing your resume...</span>
-                    <span className="text-purple-600 font-semibold text-lg">{uploadProgress}%</span>
+                  <div className="flex justify-between items-center mb-2 sm:mb-3">
+                    <span className="text-gray-700 font-medium text-sm sm:text-base">Processing your resume...</span>
+                    <span className="text-purple-600 font-semibold text-base sm:text-lg">{uploadProgress}%</span>
                   </div>
-                  <div className="w-full bg-purple-100 rounded-full h-3 overflow-hidden shadow-inner">
+                  <div className="w-full bg-purple-100 rounded-full h-2.5 sm:h-3 overflow-hidden shadow-inner">
                     <motion.div
-                      className="h-3 bg-gradient-to-r from-purple-500 via-purple-600 to-violet-600 rounded-full shadow-sm"
+                      className="h-2.5 sm:h-3 bg-gradient-to-r from-purple-500 via-purple-600 to-violet-600 rounded-full shadow-sm"
                       initial={{ width: "0%" }}
                       animate={{ width: `${uploadProgress}%` }}
                       transition={{ duration: 0.3, ease: "easeOut" }}
@@ -776,7 +776,7 @@ export default function ResumeInterviewPage() {
                   initial={{ opacity: 0, y: 20, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                  className={`relative overflow-hidden rounded-2xl p-6 shadow-lg ${
+                  className={`relative overflow-hidden rounded-2xl p-4 sm:p-6 shadow-lg ${
                     uploadMessage.includes('Success') || uploadMessage.includes('successfully')
                       ? 'bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 border-2 border-emerald-200'
                       : 'bg-gradient-to-br from-red-50 via-pink-50 to-rose-50 border-2 border-red-200'
@@ -789,35 +789,35 @@ export default function ResumeInterviewPage() {
                       : 'bg-gradient-to-br from-red-500 to-pink-500'
                   }`}></div>
                   
-                  <div className="relative flex items-center space-x-4">
+                  <div className="relative flex items-center space-x-3 sm:space-x-4">
                     {uploadMessage.includes('Success') || uploadMessage.includes('successfully') ? (
                       <motion.div 
                         initial={{ scale: 0, rotate: -180 }}
                         animate={{ scale: 1, rotate: 0 }}
                         transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                        className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-emerald-500 to-green-600 rounded-full flex items-center justify-center shadow-lg"
+                        className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-green-600 rounded-full flex items-center justify-center shadow-lg"
                       >
-                        <CheckCircle className="w-7 h-7 text-white" />
+                        <CheckCircle className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
                       </motion.div>
                     ) : (
                       <motion.div 
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                        className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-red-500 to-pink-600 rounded-full flex items-center justify-center shadow-lg"
+                        className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-red-500 to-pink-600 rounded-full flex items-center justify-center shadow-lg"
                       >
-                        <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center">
-                          <span className="text-red-600 text-lg font-bold">!</span>
+                        <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-white flex items-center justify-center">
+                          <span className="text-red-600 text-base sm:text-lg font-bold">!</span>
                         </div>
                       </motion.div>
                     )}
                     
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <motion.p 
                         initial={{ x: -20, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         transition={{ delay: 0.3 }}
-                        className={`text-lg font-semibold mb-1 ${
+                        className={`text-base sm:text-lg font-semibold mb-1 ${
                           uploadMessage.includes('Success') || uploadMessage.includes('successfully')
                             ? 'text-emerald-800'
                             : 'text-red-800'
@@ -832,7 +832,7 @@ export default function ResumeInterviewPage() {
                         initial={{ x: -20, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         transition={{ delay: 0.4 }}
-                        className={`text-sm ${
+                        className={`text-xs sm:text-sm break-words ${
                           uploadMessage.includes('Success') || uploadMessage.includes('successfully')
                             ? 'text-emerald-700'
                             : 'text-red-700'
