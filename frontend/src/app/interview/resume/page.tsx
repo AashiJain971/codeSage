@@ -52,6 +52,8 @@ export default function ResumeInterviewPage() {
   const [showCodeEditor, setShowCodeEditor] = useState(false);
   const [code, setCode] = useState('');
   const [isCodeMode, setIsCodeMode] = useState(false);
+  const [isEndingInterview, setIsEndingInterview] = useState(false);
+  const [interviewCompleted, setInterviewCompleted] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -494,11 +496,21 @@ export default function ResumeInterviewPage() {
   };
 
   const endInterview = () => {
+    // Stop any ongoing speech synthesis
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.pause();
+    }
+
+    // Send end interview message to backend
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
     
-    // Stop camera and save session data
+    // Show loading screen
+    setIsEndingInterview(true);
+    
+    // Stop camera
     stopCamera();
     
     // Save minimal session data to localStorage (avoid quota exceeded error)
@@ -515,8 +527,20 @@ export default function ResumeInterviewPage() {
       // Continue without saving - the results page will handle missing data
     }
     
-    // Redirect to results page
-    router.push('/interview/results');
+    // Simulate processing delay (2.5 seconds), then show completion screen
+    setTimeout(() => {
+      setIsEndingInterview(false);
+      setInterviewCompleted(true);
+      
+      // Close WebSocket after showing completion
+      setTimeout(() => {
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
+        }
+        setIsConnected(false);
+      }, 2000);
+    }, 2500);
   };
 
   useEffect(() => {
@@ -926,6 +950,138 @@ export default function ResumeInterviewPage() {
     );
   }
 
+  // Loading screen when ending interview
+  if (isEndingInterview) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-white via-cyan-50 to-violet-50 overflow-hidden">
+        <div className="flex items-center justify-center min-h-screen pt-20">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="max-w-md mx-auto p-8 bg-white rounded-3xl border border-gray-200 shadow-xl text-center"
+          >
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+              className="w-16 h-16 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-6"
+            >
+              <CheckCircle className="w-8 h-8 text-white" />
+            </motion.div>
+
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">
+              Ending Interview...
+            </h2>
+            <p className="text-gray-600 text-lg">
+              Please wait while we process your results
+            </p>
+
+            <div className="mt-6 flex justify-center">
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }}></div>
+                <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  // Completion screen
+  if (interviewCompleted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-white via-cyan-50 to-violet-50 overflow-hidden">
+        <div className="flex items-center justify-center min-h-screen pt-20">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="max-w-2xl mx-auto p-12 bg-white rounded-3xl shadow-2xl border border-gray-100 text-center"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.8) 100%)",
+              backdropFilter: "blur(20px)",
+            }}
+          >
+            <motion.div
+              initial={{ y: -20 }}
+              animate={{ y: 0 }}
+              className="flex items-center justify-center mb-6"
+            >
+              <CheckCircle className="w-20 h-20 text-cyan-500 mr-4" />
+              <div>
+                <h1 className="text-5xl font-bold bg-gradient-to-r from-cyan-600 to-violet-600 bg-clip-text text-transparent">
+                  Interview Complete!
+                </h1>
+                <div className="w-32 h-1 bg-gradient-to-r from-cyan-500 to-violet-500 rounded-full mx-auto mt-3"></div>
+              </div>
+            </motion.div>
+
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="text-gray-600 text-xl mb-8 leading-relaxed"
+            >
+              Excellent work! Your interview has been completed and your result
+              will be updated soon....
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="flex flex-col space-y-4 max-w-md mx-auto"
+            >
+              <motion.button
+                whileHover={{ scale: 1.05, y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  // Reset interview state and navigate to interview selection page
+                  setInterviewCompleted(false);
+                  setInterviewStarted(false);
+                  setResumeId(null);
+                  setResumeFile(null);
+                  setLogs([]);
+                  setAnswer('');
+                  setCode('');
+                  // Clear any stored session data
+                  localStorage.removeItem('interviewSession');
+                  localStorage.removeItem('interviewResults');
+                  localStorage.removeItem('lastInterviewSession');
+                  // Navigate to interview selection page
+                  router.push("/interview");
+                }}
+                className="w-full px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-cyan-600 hover:via-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl flex items-center justify-center group relative overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <ArrowLeft className="w-5 h-5 mr-3 group-hover:-translate-x-1 transition-transform relative z-10" />
+                <span className="relative z-10">
+                  Practice Another Interview
+                </span>
+                <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl"></div>
+              </motion.button>
+            </motion.div>
+
+            {/* Decorative elements */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1 }}
+              className="absolute top-4 right-4 w-20 h-20 bg-gradient-to-r from-cyan-400/20 to-violet-400/20 rounded-full blur-xl"
+            />
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.2 }}
+              className="absolute bottom-4 left-4 w-16 h-16 bg-gradient-to-r from-violet-400/20 to-cyan-400/20 rounded-full blur-xl"
+            />
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
   // Interview Console View
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
@@ -996,12 +1152,13 @@ export default function ResumeInterviewPage() {
           </motion.button>
           
           <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: isEndingInterview ? 1 : 1.05 }}
+            whileTap={{ scale: isEndingInterview ? 1 : 0.95 }}
             onClick={endInterview}
-            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full font-medium"
+            disabled={isEndingInterview}
+            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
           >
-            End Interview
+            {isEndingInterview ? 'Ending...' : 'End Interview'}
           </motion.button>
         </div>
 
