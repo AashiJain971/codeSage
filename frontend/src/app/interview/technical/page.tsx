@@ -1037,7 +1037,7 @@ export default function TechnicalInterview() {
           <motion.div
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
-            className="w-full lg:w-1/2 xl:w-3/5 flex flex-col bg-white lg:border-r border-gray-200 min-h-[400px] lg:min-h-0"
+            className="w-full lg:flex-[3_2_0%] lg:min-w-[500px] xl:min-w-[600px] 2xl:min-w-[700px] min-w-0 flex flex-col bg-white lg:border-r border-gray-200 min-h-[400px] lg:min-h-0"
           >
             {/* Language Selector */}
             <div className="flex flex-col gap-3 p-3 sm:p-4 bg-gray-50 border-b border-gray-200">
@@ -1163,8 +1163,8 @@ export default function TechnicalInterview() {
           </motion.div>
 
           {/* Right Side - Question & Chat */}
-          <div className="flex flex-col lg:flex-row w-full lg:w-1/2 xl:w-2/5 h-auto lg:h-full border-t lg:border-t-0 lg:border-l border-gray-200 overflow-y-auto lg:overflow-y-visible">
-            <div className="w-full lg:w-80 xl:w-96 flex flex-col h-auto lg:h-full">
+          <div className="flex flex-col lg:flex-row w-full lg:flex-[2_1_0%] lg:min-w-[380px] lg:max-w-[500px] xl:min-w-[420px] xl:max-w-[550px] 2xl:max-w-[600px] min-w-0 h-auto lg:h-full border-t lg:border-t-0 lg:border-l border-gray-200 overflow-y-auto lg:overflow-y-visible">
+            <div className="w-full lg:flex-1 lg:min-w-0 flex flex-col h-auto lg:h-full">
               {/* Question Panel */}
               <motion.div
                 initial={{ opacity: 0, y: -20 }}
@@ -1305,7 +1305,7 @@ export default function TechnicalInterview() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: "100%" }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="w-full lg:w-80 xl:w-96 flex flex-col bg-white border-t lg:border-t-0 lg:border-l border-gray-200 max-h-[400px] lg:max-h-none lg:h-full"
+                  className="w-full lg:w-[380px] xl:w-[420px] 2xl:w-[450px] lg:flex-shrink-0 flex flex-col bg-white border-t lg:border-t-0 lg:border-l border-gray-200 max-h-[400px] lg:max-h-none lg:h-full"
                 >
                   <div className="flex items-center justify-between p-3 sm:p-4 bg-gray-50 border-b border-gray-200">
                     <h3 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center">
