@@ -731,7 +731,7 @@ export default function ResumeInterviewPage() {
           if (msg.interview_id && msg.download_url) {
             const resultsData = {
               interview_id: msg.interview_id,
-              download_url: `http://127.0.0.1:8000${msg.download_url}`,
+              download_url: `${HTTP_BASE}${msg.download_url}`,
               timestamp: new Date().toISOString(),
               interview_type: 'resume'
             };
