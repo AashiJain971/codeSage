@@ -311,20 +311,84 @@ export default function ResumeInterviewPage() {
       console.log('⛔ VAD BLOCKED - User is actively typing');
       return;
     }
-    
-    // ECHO PREVENTION: Check if we JUST finished speaking (2 second cooldown - reduced for faster response)
+
+    // ECHO PREVENTION
     const timeSinceLastSpeech = Date.now() - lastSpeechEndTime;
     if (lastSpeechEndTime > 0 && timeSinceLastSpeech < 2000) {
       console.log(`⏸️ Waiting for speech cooldown... (${Math.round((2000 - timeSinceLastSpeech) / 1000)}s remaining)`);
       setTimeout(startServerVAD, 2000 - timeSinceLastSpeech);
       return;
     }
-    
+
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    
-    console.log('🎤 Starting VAD - Ready to listen for USER speech');
+
+    console.log('🎤 Starting client recording - speak now');
     setPhaseStatus('Listening...');
-    wsRef.current.send(JSON.stringify({ type: 'record_audio' }));
+    recordAndSendAnswer();
+  };
+
+  // Record mic locally and send transcript to backend
+  const recordAndSendAnswer = async () => {
+    try {
+      // Ensure we have an audio stream
+      let stream = cameraStream;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        });
+      }
+
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+      const stopPromise = new Promise<Blob>((resolve, reject) => {
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        recorder.onerror = (e) => reject(e);
+        recorder.onstop = () => resolve(new Blob(chunks, { type: 'audio/webm' }));
+      });
+
+      recorder.start();
+      // Record up to 6 seconds; user should speak immediately
+      setTimeout(() => {
+        try { recorder.stop(); } catch {}
+      }, 6000);
+
+      const blob = await stopPromise;
+
+      const form = new FormData();
+      form.append('file', blob, 'answer.webm');
+      const res = await fetch(`${HTTP_BASE}/transcribe_audio`, {
+        method: 'POST',
+        body: form
+      });
+      if (!res.ok) {
+        console.error('❌ Transcribe failed:', res.statusText);
+        setPhaseStatus('');
+        return;
+      }
+      const data = await res.json();
+      const transcript = (data?.transcript || '').trim();
+      if (!transcript) {
+        console.log('🤫 No transcript returned');
+        setPhaseStatus('');
+        return;
+      }
+
+      // Send to backend as a normal answer to continue interview
+      wsRef.current?.send(JSON.stringify({ type: 'answer', text: transcript }));
+      addLog('You: ' + transcript);
+      setPhaseStatus('');
+    } catch (e) {
+      console.error('❌ Error recording/transcribing:', e);
+      setPhaseStatus('');
+    }
   };
 
   const speakAndThenRecord = (text: string) => {

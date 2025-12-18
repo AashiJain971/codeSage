@@ -563,6 +563,63 @@ async def upload_resume(file: UploadFile = File(...)):
     return {"resume_id": resume_id, "pages": page_count}
 
 
+@app.post("/transcribe_audio")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Accept an uploaded audio blob (webm/wav/ogg/mp3), convert to wav if needed, and return transcript."""
+    try:
+        # Persist upload to a temp file
+        suffix = ".wav"
+        ct = (file.content_type or "").lower()
+        if "webm" in ct:
+            suffix = ".webm"
+        elif "ogg" in ct:
+            suffix = ".ogg"
+        elif "mp3" in ct:
+            suffix = ".mp3"
+        elif "m4a" in ct:
+            suffix = ".m4a"
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            src_path = tmp.name
+        
+        # If not wav, convert to wav via ffmpeg
+        ext = os.path.splitext(src_path)[1].lower()
+        wav_path = src_path
+        if ext != ".wav":
+            wav_path = src_path.replace(ext, ".wav")
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", src_path,
+                    "-ac", "1", "-ar", "16000", wav_path
+                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except Exception as e:
+                # Cleanup and return error
+                try:
+                    os.unlink(src_path)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"Audio conversion failed: {e}")
+        
+        # Transcribe
+        try:
+            transcript = transcribe(wav_path)
+        finally:
+            # Cleanup temp files
+            for p in [src_path, wav_path]:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
+        
+        return {"transcript": transcript}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+
 @app.post("/save_interview_results")
 async def save_interview_results(data: dict):
     """Save interview results as JSON file and return download URL"""
