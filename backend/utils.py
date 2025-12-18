@@ -91,8 +91,8 @@ def record_with_vad(filename="answer.wav"):
     silence_count = 0
     speech_count = 0
     speech_started = False
-    max_silence = 60  # ~1.8s of silence to stop
-    min_speech_frames = 5  # Need at least 5 speech frames (~150ms) to start recording
+    max_silence = 150  # ~4.5s of silence to stop (increased from 60 to prevent premature cutoff)
+    min_speech_frames = 1  # Capture immediately - don't cut first sentence
     
     print("🔴 READY - Please speak now!")
     
@@ -126,8 +126,8 @@ def record_with_vad(filename="answer.wav"):
                 speech_count = 0
                 silence_count += 1
                 
-                if silence_count % 30 == 0:  # Log every ~1 second
-                    print(f"🤫 Silence... ({silence_count}/200 before timeout, level: {max_amplitude})")
+                if silence_count % 50 == 0:  # Log every ~1.5 seconds
+                    print(f"🤫 Silence... ({silence_count}/{max_silence} before stop, level: {max_amplitude})")
                 
                 if speech_started:  # Only add silence frames after speech has started
                     frames.append(audio_chunk)

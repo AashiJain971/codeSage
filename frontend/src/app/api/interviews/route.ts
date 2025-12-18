@@ -1,15 +1,25 @@
 import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // Get query parameters
+    const searchParams = request.nextUrl.searchParams;
+    const queryString = searchParams.toString();
+    
+    // Build URL with query parameters
+    const backendUrl = queryString 
+      ? `http://127.0.0.1:8000/api/interviews?${queryString}`
+      : 'http://127.0.0.1:8000/api/interviews';
+    
     // Make a request to the Python backend
-    const response = await fetch('http://127.0.0.1:8000/api/interviews', {
+    const response = await fetch(backendUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      // Add timeout to prevent hanging
-      signal: AbortSignal.timeout(10000), // 10 second timeout
+      // Increased timeout for large datasets
+      signal: AbortSignal.timeout(30000), // 30 second timeout
     });
 
     if (!response.ok) {

@@ -82,28 +82,49 @@ def say(text: str, filename="out.mp3"):
 
 # --- STT with Groq Whisper ---
 def transcribe(path: str) -> str:
-    with open(path, "rb") as f:
-        result = client.audio.transcriptions.create(
-            file=(path, f.read()),
-            model="whisper-large-v3-turbo"
-        )
-    return getattr(result, "text", "").strip()
+    """Transcribe audio file to text using Groq Whisper"""
+    if not client:
+        print("❌ Groq client not available for transcription")
+        return "[Transcription unavailable - API client not initialized]"
+    
+    try:
+        with open(path, "rb") as f:
+            result = client.audio.transcriptions.create(
+                file=(path, f.read()),
+                model="whisper-large-v3-turbo",
+                response_format="text"
+            )
+        
+        # Handle both object and string responses
+        if isinstance(result, str):
+            transcript = result.strip()
+        else:
+            transcript = getattr(result, "text", "").strip()
+        
+        print(f"📝 Transcription successful: {transcript[:100]}...")
+        return transcript
+        
+    except Exception as e:
+        print(f"❌ Transcription error: {e}")
+        import traceback
+        traceback.print_exc()
+        return "[Transcription failed - please try again]"
 
 # --- LLM Interview Brain ---
 def interviewer_reply(candidate: str, context: list) -> dict:
     # Use the global INTERVIEWER_PROMPT if topics not set
     global INTERVIEWER_PROMPT
-    context_str = json.dumps(context[-3:], indent=2) if context else ""
+    # Reduce context to last 2 messages only for faster processing
+    context_str = json.dumps(context[-2:], indent=2) if context else ""
     msg = [
         {"role": "system", "content": INTERVIEWER_PROMPT},
         {"role": "user", "content": f"Conversation so far: {context_str}\nCandidate: {candidate}"}
     ]
     res = client.chat.completions.create(
-        # model="llama-3.3-70b-versatile",
-        model="llama-3.1-8b-instant",
+        model="llama-3.1-8b-instant",  # Fastest model for quick responses
         messages=msg,
         temperature=0.3,
-        max_tokens=500
+        max_tokens=300  # Reduced from 500 for faster generation
     )
     try:
         return json.loads(res.choices[0].message.content)

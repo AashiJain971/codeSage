@@ -351,14 +351,27 @@ export default function ResumeInterviewPage() {
       }
       
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
+      // Normal speech rate for natural delivery
+      utterance.rate = 1.0; // Normal speed
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
       
+      // Pre-select fast voice
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        const fastVoice = voices.find(v => 
+          v.name.includes('Google') || v.name.includes('en-US') || v.lang === 'en-US'
+        );
+        if (fastVoice) utterance.voice = fastVoice;
+      }
+      
       setIsSpeaking(true);
       
+      const startTime = Date.now();
+      
       utterance.onstart = () => {
-        console.log('🗣️ Speech synthesis started');
+        const elapsed = Date.now() - startTime;
+        console.log(`🗣️ Speech started in ${elapsed}ms`);
       };
       
       utterance.onend = () => {
@@ -368,11 +381,11 @@ export default function ResumeInterviewPage() {
         // Record when speech ended for cooldown tracking
         setLastSpeechEndTime(Date.now());
         
-        // ECHO PREVENTION: Delay before starting VAD (2 seconds for faster response)
+        // OPTIMIZED: Reduced delay from 2000ms to 800ms for faster VAD start
         setTimeout(() => {
-          console.log('🎯 Starting VAD after 2s speech delay');
+          console.log('🎯 Starting VAD after 800ms delay (optimized)');
           startServerVAD();
-        }, 2000); // 2000ms = 2 seconds delay
+        }, 800); // Reduced from 2000ms
       };
       
       utterance.onerror = (e) => {
@@ -454,6 +467,9 @@ export default function ResumeInterviewPage() {
         console.log('📩 WebSocket message received:', msg);
         
         if (msg.type === 'ready') {
+          // Clear thinking status and show speaking status
+          setPhaseStatus('AI is speaking...');
+          
           // Don't show "READY:" in chat - only process question
           if (msg.next_question) {
             addLog('Q: ' + msg.next_question);
@@ -554,6 +570,10 @@ export default function ResumeInterviewPage() {
           setPhaseStatus('Listening...');
         } else if (msg.type === 'transcribed') {
           console.log('📨 TRANSCRIPT MESSAGE RECEIVED FROM BACKEND');
+          
+          // IMMEDIATE FEEDBACK: Show AI is processing
+          setPhaseStatus('AI is thinking...');
+          
           // Show user's transcript in chat
           if (msg.transcript) {
             let transcript = msg.transcript.trim();
@@ -587,13 +607,8 @@ export default function ResumeInterviewPage() {
               return;
             }
             
-            // ULTRA-CRITICAL FILTER 2: If transcript is long (>100 chars), likely AI speech
-            if (transcript.length > 100) {
-              console.log('🚫 BLOCKED: Transcript too long (likely AI speech, not user)');
-              console.log('   Length:', transcript.length, 'chars');
-              setPhaseStatus('');
-              return;
-            }
+            // NO LENGTH LIMIT: Allow any length of user speech
+            console.log('✅ Transcript accepted, length:', transcript.length, 'chars');
             
             // CRITICAL FILTER 3: Calculate exact similarity with AI question
             if (lastAIQuestion && lastAIQuestion.length > 15) {
@@ -714,6 +729,10 @@ export default function ResumeInterviewPage() {
           // Don't show "INVALID:" in chat - only reset phase
           console.log('⚠️ Invalid transcript received from backend');
           setPhaseStatus('');
+        } else if (msg.type === 'ai_thinking') {
+          // Show AI processing indicator without adding to chat
+          console.log('🤖 AI is processing response...');
+          setPhaseStatus('AI is thinking...');
         } else if (msg.type === 'ended') {
           // Don't show "ENDED" in chat
           setPhaseStatus('');
@@ -974,12 +993,18 @@ export default function ResumeInterviewPage() {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    // Clear typing state after 2 seconds of inactivity (reduced for faster voice)
+    // OPTIMIZED: Reduced timeout from 2000ms to 1500ms for faster response
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
       setBlockVAD(false);
-      console.log('✅ VAD unblocked - Typing stopped');
-    }, 2000); // 2 seconds - faster response
+      console.log('✅ VAD unblocked - Typing stopped (1500ms timeout)');
+      
+      // If AI should be speaking but isn't, check state
+      if (!isSpeaking && phase === 'Listening...') {
+        console.log('🔊 Checking if VAD should restart');
+        setTimeout(startServerVAD, 300);
+      }
+    }, 1500); // Reduced from 2000ms
   };
 
   const submitCode = () => {
@@ -1016,73 +1041,113 @@ export default function ResumeInterviewPage() {
   };
 
   const endInterview = () => {
-    // Stop any ongoing speech synthesis
+    console.log('🚨 END INTERVIEW TRIGGERED - Starting comprehensive cleanup');
+    
+    // 1. IMMEDIATELY stop all voice/speech activities
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      console.log('🛑 Stopping all speech synthesis');
       window.speechSynthesis.cancel();
       window.speechSynthesis.pause();
+      
+      // Force clear by speaking empty
+      try {
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+      } catch (e) { /* ignore */ }
     }
 
-    // Set ending flag to prevent reconnection
+    // 2. Set ending flags to prevent reconnection and further processing
     setIsEndingInterview(true);
+    setBlockVAD(true); // Block any further VAD
     
-    // Send end interview message to backend
+    // 3. Send FORCE STOP command to backend
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
-        wsRef.current.send(JSON.stringify({ type: 'end' }));
+        const stopPayload = { 
+          type: 'stop_interview',
+          session_id: resumeId || `session_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          force_stop: true
+        };
+        console.log('📤 Sending force stop command:', stopPayload);
+        wsRef.current.send(JSON.stringify(stopPayload));
+        
+        // Also send legacy 'end' message for compatibility
+        setTimeout(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'end' }));
+          }
+        }, 100);
       } catch (e) {
-        console.error('Failed to send end message:', e);
+        console.error('Failed to send stop message:', e);
       }
     }
     
-    // Stop camera
+    // 4. Stop ALL media streams immediately
+    console.log('🎥 Stopping camera and microphone');
     stopCamera();
     
-    // Clear all input states
+    // 5. Force close WebSocket with proper close code
+    if (wsRef.current) {
+      console.log('🔌 Force closing WebSocket connection');
+      try {
+        wsRef.current.close(1000, "Interview ended by user");
+      } catch (e) {
+        console.error('Error closing WebSocket:', e);
+      }
+      wsRef.current = null;
+    }
+    
+    // 6. Clear all input states
+    console.log('🧹 Clearing all input states');
     setAnswer('');
     setCode('');
     setShowCodeEditor(false);
     setIsCodeMode(false);
     setPhaseStatus('');
     
-    // Clear reconnection timer
+    // 7. Clear ALL timeouts and intervals
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+    if (endTimeoutRef.current) {
+      clearTimeout(endTimeoutRef.current);
+      endTimeoutRef.current = null;
+    }
     
-    // Save minimal session data to localStorage (avoid quota exceeded error)
+    // Clear any global speech timeouts
+    if (typeof window !== 'undefined') {
+      const speechTimeouts = (window as any).__speechTimeouts || [];
+      speechTimeouts.forEach(clearTimeout);
+      (window as any).__speechTimeouts = [];
+    }
+    
+    // 8. Save minimal session data
     const sessionData = {
       interviewType: 'resume',
-      timestamp: new Date().toISOString(),
-      messages: logs.slice(-20) // Keep only last 20 messages to avoid storage quota
+      ended_at: new Date().toISOString(),
+      manually_ended: true,
+      messages_count: logs.length
     };
     
     try {
       localStorage.setItem('lastInterviewSession', JSON.stringify(sessionData));
+      localStorage.removeItem('interviewResults');
+      localStorage.removeItem('interviewSession');
     } catch (e) {
-      console.warn('Failed to save session to localStorage:', e);
+      console.warn('LocalStorage cleanup warning:', e);
     }
     
-    // Clear any existing timeout first
-    if (endTimeoutRef.current) {
-      clearTimeout(endTimeoutRef.current);
-    }
-    
-    // ONE SINGLE TIMEOUT: Exactly 2.5 seconds total
+    // 9. Navigate to completion after SHORT delay (1 second only)
     endTimeoutRef.current = setTimeout(() => {
+      console.log('✅ Interview cleanup complete, showing completion screen');
       setInterviewCompleted(true);
-      
-      // Close WebSocket immediately (no extra timeout)
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setIsConnected(false);
       setIsEndingInterview(false);
-      
-      // Clear timeout ref
-      endTimeoutRef.current = null;
-    }, 2500); // EXACTLY 2.5 seconds - no nested timeouts
+    }, 1000); // Reduced from 2500ms to 1000ms
   };
 
   useEffect(() => {

@@ -5,14 +5,18 @@ import tempfile
 import asyncio
 import subprocess
 import time
-from typing import Optional, Dict, List
+import csv
+import io
+from typing import Optional, Dict, List, Any
+from datetime import datetime, timedelta
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 # Import all functions from existing modules
 from utils import TOPIC_OPTIONS, build_interviewer_prompt, record_with_vad
@@ -620,6 +624,291 @@ async def get_interview_details(session_id: str):
 
 
 # -----------------------------
+# Helper Functions for Analytics
+# -----------------------------
+def calculate_status(completion_method: str, average_score: Optional[int]) -> str:
+    """Calculate interview status based on completion method and score"""
+    if completion_method == "manually_ended":
+        return "manually_ended"
+    elif completion_method == "timeout_cleanup":
+        return "timeout"
+    elif average_score is not None:
+        return "approved" if average_score >= 70 else "rejected"
+    return "in_progress"
+
+
+def format_interview_data(interview: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform database interview data to frontend format"""
+    duration_seconds = interview.get("duration", 0) or 0
+    duration_minutes = round(duration_seconds / 60) if duration_seconds > 0 else 0
+    
+    completion_method = interview.get("completion_method", "automatic")
+    average_score = interview.get("average_score")
+    status = calculate_status(completion_method, average_score)
+    
+    final_results = interview.get("final_results", {})
+    if isinstance(final_results, str):
+        try:
+            final_results = json.loads(final_results)
+        except:
+            final_results = {}
+    
+    interviewer = final_results.get("interviewer", "AI Interviewer")
+    topics = interview.get("topics", [])
+    if not topics:
+        topics = final_results.get("topics", [])
+    
+    feedback = final_results.get("overall_feedback", "No feedback available")
+    
+    return {
+        "id": interview.get("session_id"),
+        "type": interview.get("interview_type", "technical"),
+        "date": interview.get("created_at"),
+        "duration": duration_minutes,
+        "duration_seconds": duration_seconds,
+        "score": average_score or 0,
+        "status": status,
+        "topics": topics,
+        "questions_completed": interview.get("completed_questions", 0),
+        "total_questions": interview.get("total_questions", 0),
+        "interviewer": interviewer,
+        "feedback": feedback,
+        "completion_method": completion_method,
+        "individual_scores": interview.get("individual_scores", []),
+        "start_time": interview.get("start_time"),
+        "end_time": interview.get("end_time"),
+        "final_results": final_results
+    }
+
+
+# -----------------------------
+# Analytics & Stats Endpoints
+# -----------------------------
+@app.get("/api/interviews/stats/overview")
+async def get_stats_overview():
+    """Get overall statistics and metrics"""
+    try:
+        all_interviews = await db.get_all_interviews(limit=1000)
+        formatted = [format_interview_data(i) for i in all_interviews]
+        
+        total = len(formatted)
+        if total == 0:
+            return {
+                "total": 0, "approved": 0, "rejected": 0,
+                "manually_ended": 0, "timeout": 0, "average_score": 0,
+                "average_duration": 0, "total_questions_answered": 0,
+                "completion_rate": 0
+            }
+        
+        approved = len([i for i in formatted if i["status"] == "approved"])
+        rejected = len([i for i in formatted if i["status"] == "rejected"])
+        manually_ended = len([i for i in formatted if i["status"] == "manually_ended"])
+        timeout = len([i for i in formatted if i["status"] == "timeout"])
+        
+        scores = [i["score"] for i in formatted if i["score"] > 0]
+        average_score = round(sum(scores) / len(scores)) if scores else 0
+        
+        durations = [i["duration"] for i in formatted if i["duration"] > 0]
+        average_duration = round(sum(durations) / len(durations)) if durations else 0
+        
+        total_questions = sum(i["questions_completed"] for i in formatted)
+        expected_questions = sum(i["total_questions"] for i in formatted)
+        completion_rate = round((total_questions / expected_questions * 100)) if expected_questions > 0 else 0
+        
+        return {
+            "total": total, "approved": approved, "rejected": rejected,
+            "manually_ended": manually_ended, "timeout": timeout,
+            "average_score": average_score, "average_duration": average_duration,
+            "total_questions_answered": total_questions,
+            "completion_rate": completion_rate
+        }
+    except Exception as e:
+        print(f"❌ Error in get_stats_overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interviews/analytics/performance")
+async def get_performance_analytics():
+    """Get detailed performance analytics including topic breakdown and trends"""
+    try:
+        all_interviews = await db.get_all_interviews(limit=1000)
+        formatted = [format_interview_data(i) for i in all_interviews]
+        
+        if not formatted:
+            return {
+                "topic_performance": [], "score_distribution": {},
+                "time_efficiency": {}, "improvement_trend": [],
+                "consistency_score": 0
+            }
+        
+        topic_scores = defaultdict(list)
+        for interview in formatted:
+            for topic in interview.get("topics", []):
+                if interview["score"] > 0:
+                    topic_scores[topic].append(interview["score"])
+        
+        topic_performance = [
+            {
+                "topic": topic,
+                "average_score": round(sum(scores) / len(scores)),
+                "attempts": len(scores),
+                "max_score": max(scores),
+                "min_score": min(scores)
+            }
+            for topic, scores in topic_scores.items()
+        ]
+        topic_performance.sort(key=lambda x: x["average_score"], reverse=True)
+        
+        score_ranges = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+        for interview in formatted:
+            score = interview["score"]
+            if score <= 20:
+                score_ranges["0-20"] += 1
+            elif score <= 40:
+                score_ranges["21-40"] += 1
+            elif score <= 60:
+                score_ranges["41-60"] += 1
+            elif score <= 80:
+                score_ranges["61-80"] += 1
+            else:
+                score_ranges["81-100"] += 1
+        
+        sorted_interviews = sorted(formatted, key=lambda x: x["date"])
+        recent_interviews = sorted_interviews[-10:]
+        improvement_trend = [
+            {"date": i["date"], "score": i["score"], "interview_number": idx + 1}
+            for idx, i in enumerate(recent_interviews)
+        ]
+        
+        scores = [i["score"] for i in formatted if i["score"] > 0]
+        if len(scores) > 1:
+            mean_score = sum(scores) / len(scores)
+            variance = sum((s - mean_score) ** 2 for s in scores) / len(scores)
+            std_dev = variance ** 0.5
+            consistency_score = max(0, round(100 - std_dev))
+        else:
+            consistency_score = 100
+        
+        return {
+            "topic_performance": topic_performance,
+            "score_distribution": score_ranges,
+            "time_efficiency": {"average": 0},
+            "improvement_trend": improvement_trend,
+            "consistency_score": consistency_score
+        }
+    except Exception as e:
+        print(f"❌ Error in get_performance_analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interviews/analytics/insights")
+async def get_performance_insights():
+    """Get AI-generated performance insights and recommendations"""
+    try:
+        all_interviews = await db.get_all_interviews(limit=1000)
+        formatted = [format_interview_data(i) for i in all_interviews]
+        
+        if not formatted:
+            return {"strengths": [], "areas_for_improvement": [], "recommendations": []}
+        
+        topic_scores = defaultdict(list)
+        for interview in formatted:
+            for topic in interview.get("topics", []):
+                if interview["score"] > 0:
+                    topic_scores[topic].append(interview["score"])
+        
+        strengths = []
+        weaknesses = []
+        
+        for topic, scores in topic_scores.items():
+            avg = sum(scores) / len(scores)
+            if avg >= 80:
+                strengths.append({
+                    "topic": topic,
+                    "average_score": round(avg),
+                    "description": f"Excellent performance in {topic}"
+                })
+            elif avg < 60:
+                weaknesses.append({
+                    "topic": topic,
+                    "average_score": round(avg),
+                    "description": f"Need improvement in {topic}"
+                })
+        
+        recommendations = []
+        total_expected = sum(i["total_questions"] for i in formatted)
+        total_completed = sum(i["questions_completed"] for i in formatted)
+        if total_expected > 0:
+            completion_rate = (total_completed / total_expected) * 100
+            if completion_rate < 80:
+                recommendations.append({
+                    "category": "Time Management",
+                    "suggestion": "Focus on completing more questions. Try time-boxing each question.",
+                    "priority": "high"
+                })
+        
+        return {
+            "strengths": strengths,
+            "areas_for_improvement": weaknesses,
+            "recommendations": recommendations
+        }
+    except Exception as e:
+        print(f"❌ Error in get_performance_insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interviews/export")
+async def export_interviews(
+    format: str = Query("csv", regex="^(csv|json)$"),
+    status_filter: Optional[str] = Query(None)
+):
+    """Export interview data in CSV or JSON format"""
+    try:
+        all_interviews = await db.get_all_interviews(limit=1000)
+        formatted = [format_interview_data(i) for i in all_interviews]
+        
+        if status_filter:
+            formatted = [i for i in formatted if i["status"] == status_filter]
+        
+        if format == "csv":
+            output = io.StringIO()
+            if formatted:
+                fieldnames = ["id", "type", "date", "duration", "score", "status",
+                             "questions_completed", "total_questions", "interviewer", "completion_method"]
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for interview in formatted:
+                    writer.writerow({
+                        "id": interview["id"],
+                        "type": interview["type"],
+                        "date": interview["date"],
+                        "duration": interview["duration"],
+                        "score": interview["score"],
+                        "status": interview["status"],
+                        "questions_completed": interview["questions_completed"],
+                        "total_questions": interview["total_questions"],
+                        "interviewer": interview["interviewer"],
+                        "completion_method": interview["completion_method"]
+                    })
+            
+            output.seek(0)
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=interviews_{datetime.now().strftime('%Y%m%d')}.csv"}
+            )
+        else:
+            return JSONResponse(
+                content={"interviews": formatted, "exported_at": datetime.now().isoformat()},
+                headers={"Content-Disposition": f"attachment; filename=interviews_{datetime.now().strftime('%Y%m%d')}.json"}
+            )
+    except Exception as e:
+        print(f"❌ Error in export_interviews: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------
 # WebSocket endpoint
 # -----------------------------
 @app.websocket("/ws")
@@ -628,7 +917,11 @@ async def ws_endpoint(ws: WebSocket):
 
     session = {
         "prompt": None,
-        "conversation": []
+        "conversation": [],
+        "session_id": None,
+        "interview_id": None,
+        "start_time": None,
+        "mode": None
     }
 
     try:
@@ -643,6 +936,26 @@ async def ws_endpoint(ws: WebSocket):
                 continue
 
             mtype = msg.get("type")
+
+            # Force stop handler - immediately terminate interview
+            if mtype == "stop_interview":
+                session_id = msg.get("session_id", "unknown")
+                print(f"🛑 FORCE STOP requested for session: {session_id}")
+                
+                # Set ended flag immediately
+                session["ended"] = True
+                session["force_stopped"] = True
+                
+                # Send acknowledgment
+                await ws.send_text(json.dumps({
+                    "type": "interview_stopped",
+                    "message": "Interview forcefully terminated",
+                    "timestamp": datetime.now().isoformat()
+                }))
+                
+                # Break out of loop to close connection
+                print(f"✅ Force stop acknowledged, terminating WebSocket")
+                break
 
             if mtype == "init":
                 mode = msg.get("mode")  # "topics" | "resume"
@@ -679,9 +992,27 @@ async def ws_endpoint(ws: WebSocket):
                             "type": "error", "error": "Invalid or missing resume_id"
                         }))
                         continue
-                    # Store session info
+                    
+                    # Create database session for resume interview
+                    session_id = str(uuid.uuid4())
+                    start_time = time.time()
+                    session["session_id"] = session_id
+                    session["start_time"] = start_time
                     session["mode"] = mode
                     session["resume_id"] = resume_id
+                    
+                    # Create interview session in database
+                    session_data = {
+                        "session_id": session_id,
+                        "interview_type": "resume",
+                        "topics": ["Resume-Based"],
+                        "start_time": start_time,
+                        "total_questions": 0  # Will be determined dynamically
+                    }
+                    interview_id = await db.create_interview_session(session_data)
+                    session["interview_id"] = interview_id
+                    print(f"✅ Resume interview session created: {session_id} (DB ID: {interview_id})")
+                    
                     resume_text = resume_store[resume_id]
                     # Resume-based prompt. Avoid f-string so JSON braces remain literal.
                     prompt = """
@@ -801,63 +1132,128 @@ Resume:
                 await ws.send_text(json.dumps({"type": "assessment", **reply}))
 
             elif mtype == "record_audio":
+                # Check if interview has ended
+                if session.get("ended", False):
+                    print("⚠️ Ignoring record_audio - interview already ended")
+                    break
+                    
                 await ws.send_text(json.dumps({"type": "listening", "message": "Listening for speech..."}))
                 try:
                     filename = f"ws_ans_{len(session['conversation'])}.wav"
+                    print(f"🎙️  Starting audio recording for {filename}...")
                     recorded_file, heard_speech = record_with_vad(filename)
+                    
                     if not heard_speech:
+                        print("❌ No speech detected in recording")
                         await ws.send_text(json.dumps({
                             "type": "no_speech",
                             "message": "No speech detected. Please speak louder or check your microphone."
                         }))
                         continue
+                    
+                    print(f"🎤 Audio recorded successfully, transcribing {recorded_file}...")
                     candidate = transcribe(recorded_file)
+                    print(f"📝 Transcription result: '{candidate}'")
+                    
                     try:
                         os.remove(recorded_file)
                     except Exception:
                         pass
+                    
                     if not transcript_is_valid(candidate):
+                        print(f"⚠️  Invalid transcript detected: '{candidate}'")
                         await ws.send_text(json.dumps({
                             "type": "invalid_transcript",
                             "message": "Could not understand. Please repeat more clearly.",
                             "transcript": candidate
                         }))
                         continue
+                    
+                    print(f"✅ Valid transcript, sending to frontend: '{candidate[:100]}...'")
+                    
+                    # Send transcript immediately to show in chat
                     await ws.send_text(json.dumps({
                         "type": "transcribed",
                         "transcript": candidate
                     }))
+                    
+                    # Send AI processing indicator immediately
+                    await ws.send_text(json.dumps({
+                        "type": "ai_thinking",
+                        "message": "AI is processing..."
+                    }))
+                    
+                    print("🤖 Getting AI response...")
                     reply = interviewer_reply(candidate, session["conversation"])
                     session["conversation"].append({
                         "candidate": candidate,
                         **reply
                     })
+                    
+                    print(f"📤 Sending assessment to frontend")
                     await ws.send_text(json.dumps({"type": "assessment", **reply}))
+                    
                 except Exception as e:
+                    print(f"❌ Error in record_audio handler: {e}")
+                    import traceback
+                    traceback.print_exc()
                     await ws.send_text(json.dumps({
                         "type": "error",
                         "error": f"Recording failed: {str(e)}"
                     }))
 
             elif mtype == "end":
+                # Set flag to stop any ongoing recording
+                session["ended"] = True
+                
                 # Save interview results before ending
                 try:
                     if session and "conversation" in session:
+                        interview_id = str(uuid.uuid4())
+                        import datetime
+                        end_time = time.time()
+                        
                         interview_data = {
-                            "interview_id": str(uuid.uuid4()),
-                            "timestamp": json.dumps(None, default=str),  # Will be handled by JSON encoder
+                            "interview_id": interview_id,
+                            "timestamp": datetime.datetime.now().isoformat(),
                             "interview_type": session.get("mode", "unknown"),
                             "conversation": session["conversation"],
                             "resume_id": session.get("resume_id"),
                             "topics": session.get("topics", []),
                             "total_interactions": len(session["conversation"])
                         }
-                        # Add current timestamp
-                        import datetime
-                        interview_data["timestamp"] = datetime.datetime.now().isoformat()
                         
-                        # Save to file
-                        interview_id = interview_data["interview_id"]
+                        # Save to database if session was tracked
+                        if session.get("session_id") and session.get("interview_id"):
+                            print(f"📊 Saving {session.get('mode', 'unknown')} interview to database...")
+                            
+                            # Calculate duration
+                            duration = int(end_time - session.get("start_time", end_time))
+                            
+                            # Complete the interview in database
+                            results_data = {
+                                "end_time": end_time,
+                                "duration": duration,
+                                "total_time": duration,
+                                "completed_questions": len(session["conversation"]),
+                                "average_score": 0,  # No scoring for conversational interviews
+                                "individual_scores": [],
+                                "final_results": interview_data,
+                                "completion_method": "manual"
+                            }
+                            
+                            db_success = await db.complete_interview(session["session_id"], results_data)
+                            if db_success:
+                                print(f"✅ Resume interview saved to database: {session['session_id']}")
+                                # Invalidate cache so Past Interviews shows updated data immediately
+                                from database import _interviews_cache
+                                _interviews_cache["data"] = None
+                                _interviews_cache["timestamp"] = 0
+                                print("🔄 Cache invalidated - Past Interviews will show fresh data")
+                            else:
+                                print(f"❌ Failed to save resume interview to database")
+                        
+                        # Also save to file for backup
                         filename = f"interview_results_{interview_id}.json"
                         results_dir = "interview_results"
                         os.makedirs(results_dir, exist_ok=True)
@@ -874,6 +1270,9 @@ Resume:
                     else:
                         await ws.send_text(json.dumps({"type": "ended"}))
                 except Exception as e:
+                    print(f"❌ Error saving interview results: {e}")
+                    import traceback
+                    traceback.print_exc()
                     await ws.send_text(json.dumps({
                         "type": "ended",
                         "error": f"Failed to save results: {str(e)}"
@@ -887,6 +1286,32 @@ Resume:
                 }))
 
     except WebSocketDisconnect:
+        # Save session on disconnect if it exists
+        if session.get("session_id") and session.get("interview_id"):
+            try:
+                print(f"📊 WebSocket disconnected, saving {session.get('mode', 'unknown')} interview...")
+                end_time = time.time()
+                duration = int(end_time - session.get("start_time", end_time))
+                
+                results_data = {
+                    "end_time": end_time,
+                    "duration": duration,
+                    "total_time": duration,
+                    "completed_questions": len(session.get("conversation", [])),
+                    "average_score": 0,
+                    "individual_scores": [],
+                    "final_results": {
+                        "interview_type": session.get("mode", "unknown"),
+                        "conversation": session.get("conversation", []),
+                        "total_interactions": len(session.get("conversation", []))
+                    },
+                    "completion_method": "disconnected"
+                }
+                
+                await db.complete_interview(session["session_id"], results_data)
+                print(f"✅ Interview saved on disconnect: {session['session_id']}")
+            except Exception as e:
+                print(f"❌ Error saving interview on disconnect: {e}")
         return
 
 

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional, Dict, List, Any
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -23,11 +24,20 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
     supabase: Optional[Client] = None
 else:
     try:
+        # Create client (timeout is handled at httpx level internally)
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         print("✅ Supabase client initialized successfully")
     except Exception as e:
         print(f"❌ Failed to initialize Supabase client: {e}")
         supabase = None
+
+
+# Simple cache for interviews to reduce database load
+_interviews_cache = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 60  # Cache for 60 seconds for faster page loads
+}
 
 
 class InterviewDatabase:
@@ -226,19 +236,49 @@ class InterviewDatabase:
     
     async def get_all_interviews(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get all interview records with optional limit"""
+        global _interviews_cache
+        
         if not self.supabase:
+            print("❌ Supabase client not available")
             return []
+        
+        # Check cache first
+        current_time = time.time()
+        if _interviews_cache["data"] is not None and (current_time - _interviews_cache["timestamp"]) < _interviews_cache["ttl"]:
+            print(f"✅ Returning {len(_interviews_cache['data'])} interviews from cache")
+            return _interviews_cache["data"][:limit]
             
         try:
-            result = self.supabase.table("interviews").select("*").order("created_at", desc=True).limit(limit).execute()
+            # No artificial limit - fetch all records requested
+            print(f"🔍 Fetching {limit} interviews from database...")
+            
+            # Use simpler query
+            result = self.supabase.table("interviews").select(
+                "session_id, interview_type, topics, status, completion_method, "
+                "total_questions, completed_questions, average_score, "
+                "duration, created_at"
+            ).order("created_at", desc=True).limit(limit).execute()
             
             if result.data:
+                print(f"✅ Retrieved {len(result.data)} interviews from database")
+                # Update cache
+                _interviews_cache["data"] = result.data
+                _interviews_cache["timestamp"] = current_time
                 return result.data
             else:
+                print("⚠️  No interviews found in database")
                 return []
                 
         except Exception as e:
-            print(f"❌ Error getting all interviews: {e}")
+            error_msg = str(e)
+            print(f"❌ Error getting all interviews: {error_msg}")
+            
+            # Return cached data if available, even if stale
+            if _interviews_cache["data"] is not None:
+                print(f"⚠️  Returning stale cached data ({len(_interviews_cache['data'])} interviews)")
+                return _interviews_cache["data"][:limit]
+            
+            # Return empty list as last resort
             return []
     
     async def store_question_response(self, session_id: str, question_index: int, question_data: Dict[str, Any]) -> bool:
