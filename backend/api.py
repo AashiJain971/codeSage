@@ -220,7 +220,7 @@ async def get_stats_overview():
 
 @app.get("/api/interviews/analytics/performance")
 async def get_performance_analytics():
-    """Get detailed performance analytics including topic breakdown and trends"""
+    """Get  performance analytics including topic breakdown and trends"""
     try:
         all_interviews = await db.get_all_interviews(limit=1000)
         formatted = [format_interview_data(i) for i in all_interviews]

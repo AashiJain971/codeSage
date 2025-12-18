@@ -15,8 +15,8 @@ const Features = () => {
           <path d="M12 21c0-1 1-3 3-3s3 2 3 3-1 3-3 3-3-2-3-3"></path>
         </svg>
       ),
-      title: 'AI-Powered Mock Interviews',
-      description: 'Experience realistic interview scenarios with advanced AI that adapts to your responses and provides dynamic follow-up questions.'
+      title: 'Technical Interviews',
+      description: 'Practice coding and technical interviews with AI-powered questions. Features real-time voice interaction, code editor, and instant feedback on your solutions.'
     },
     {
       id: 2,
@@ -29,8 +29,8 @@ const Features = () => {
           <polyline points="10,9 9,9 8,9"></polyline>
         </svg>
       ),
-      title: 'Resume Analysis',
-      description: 'Get intelligent insights on your resume with AI-powered analysis that identifies strengths, weaknesses, and optimization opportunities.'
+      title: 'Resume-Based Interviews',
+      description: 'Upload your resume and get personalized interview questions based on your experience, projects, and skills. Perfect for behavioral interview practice.'
     },
     {
       id: 3,
@@ -40,20 +40,19 @@ const Features = () => {
           <circle cx="12" cy="12" r="3"></circle>
         </svg>
       ),
-      title: 'Past Interview Review',
-      description: 'Access detailed recordings and analysis of your previous interviews to track progress and identify areas for improvement.'
+      title: 'Past Interview Analytics',
+      description: 'Review all your past interviews with detailed performance metrics, and visual analytics. Track your progress over time and identify improvement areas.'
     },
     {
       id: 4,
       icon: (
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-          <path d="M9 14l2 2 4-4"></path>
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12,6 12,12 16,14"></polyline>
         </svg>
       ),
-      title: 'Personalized Results',
-      description: 'Receive comprehensive performance reports with personalized recommendations and learning paths tailored to your career goals.'
+      title: 'Real-Time Voice Interaction',
+      description: 'Experience natural interview conversations with speech-to-text transcription, AI-powered responses, and seamless voice interaction for realistic practice.'
     }
   ];
 

@@ -356,15 +356,6 @@ export default function ResumeInterviewPage() {
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
       
-      // Pre-select fast voice
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        const fastVoice = voices.find(v => 
-          v.name.includes('Google') || v.name.includes('en-US') || v.lang === 'en-US'
-        );
-        if (fastVoice) utterance.voice = fastVoice;
-      }
-      
       setIsSpeaking(true);
       
       const startTime = Date.now();
