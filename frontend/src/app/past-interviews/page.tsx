@@ -1,113 +1,187 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Calendar, Clock, User, CheckCircle, XCircle, Trophy, Code2, FileText, Star, TrendingUp } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { 
+  Calendar, Clock, User, CheckCircle, XCircle, Trophy, Code2, 
+  FileText, Star, TrendingUp, Download, Filter, Search, X,
+  BarChart3, Activity
+} from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import Navbar from '../../components/Navbar';
-
-interface Interview {
-  id: string;
-  type: 'technical' | 'resume';
-  date: string;
-  duration: number; // in minutes
-  score: number;
-  status: 'approved' | 'rejected';
-  topics?: string[];
-  questions_completed: number;
-  total_questions: number;
-  interviewer: string;
-  feedback: string;
-}
+import ScoreTrendChart from '../../components/charts/ScoreTrendChart';
+import TopicRadarChart from '../../components/charts/TopicRadarChart';
+import ScoreDistributionChart from '../../components/charts/ScoreDistributionChart';
+import ActivityHeatmap from '../../components/charts/ActivityHeatmap';
+import PerformanceInsightsPanel from '../../components/analytics/PerformanceInsightsPanel';
+import { Interview, PerformanceAnalytics, PerformanceInsights } from '../../types/interview';
+import { 
+  filterInterviews, 
+  sortInterviews, 
+  getAllTopics, 
+  calculateStats,
+  formatDate,
+  getScoreColor,
+  getStatusColor,
+  FilterOptions,
+  defaultFilters
+} from '../../utils/interviewUtils';
 
 export default function PastInterviewsPage() {
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'approved' | 'rejected'>('all');
-  const [sortBy, setSortBy] = useState<'date' | 'score'>('date');
+  const [initialLoad, setInitialLoad] = useState(true); // Track first load
+  const [filters, setFilters] = useState<FilterOptions>(defaultFilters);
+  const [sortBy, setSortBy] = useState<'date' | 'score' | 'duration' | 'questions'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Analytics data
+  const [analytics, setAnalytics] = useState<PerformanceAnalytics | null>(null);
+  const [insights, setInsights] = useState<PerformanceInsights | null>(null);
 
-  // Fetch real data from Supabase database
-  useEffect(() => {
-    const fetchInterviews = async () => {
-      setLoading(true);
+  // Fetch interviews with server-side filtering
+  const fetchInterviews = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Build query params for server-side filtering
+      const params = new URLSearchParams();
+      params.append('page', '1');
+      params.append('limit', '200');  // Reduced for faster loading - can increase if needed
       
+      if (filters.status !== 'all') {
+        params.append('status_filter', filters.status);
+      }
+      if (filters.interviewType !== 'all') {
+        params.append('interview_type', filters.interviewType);
+      }
+      if (filters.scoreRange.min > 0) {
+        params.append('min_score', filters.scoreRange.min.toString());
+      }
+      if (filters.scoreRange.max < 100) {
+        params.append('max_score', filters.scoreRange.max.toString());
+      }
+      
+      const response = await fetch(`/api/interviews?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch interviews');
+      }
+      
+      const data = await response.json();
+      
+      // Backend returns { interviews: [], total, page, etc. }
+      if (data.interviews && Array.isArray(data.interviews)) {
+        setInterviews(data.interviews);
+      } else if (data.error) {
+        setError(data.message || 'Failed to fetch interviews');
+        setInterviews([]);
+      } else {
+        console.warn('No interviews data received');
+        setInterviews([]);
+      }
+    } catch (error) {
+      console.error('Error fetching interviews:', error);
+      setError('Unable to connect to the backend. Please ensure the server is running.');
+      setInterviews([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      setInitialLoad(false); // Mark initial load complete
+    }
+  };
+
+  // Initial fetch and refetch when filters change
+  useEffect(() => {
+    fetchInterviews();
+  }, [filters.status, filters.interviewType, filters.scoreRange]);
+
+  // Fetch analytics
+  useEffect(() => {
+    const fetchAnalytics = async () => {
       try {
-        const response = await fetch('/api/interviews');
+        const [analyticsRes, insightsRes] = await Promise.all([
+          fetch('/api/interviews/analytics'),
+          fetch('/api/interviews/insights')
+        ]);
         
-        if (!response.ok) {
-          throw new Error('Failed to fetch interviews');
+        if (analyticsRes.ok) {
+          const analyticsData = await analyticsRes.json();
+          setAnalytics(analyticsData);
         }
         
-        const data = await response.json();
-        console.log('Fetched interviews data:', data); // Debug log
-        
-        // Handle both success and error cases gracefully
-        if (data.interviews && Array.isArray(data.interviews)) {
-          setInterviews(data.interviews);
-        } else {
-          console.warn('No interviews data received:', data.message || 'Unknown reason');
-          setInterviews([]);
+        if (insightsRes.ok) {
+          const insightsData = await insightsRes.json();
+          setInsights(insightsData);
         }
       } catch (error) {
-        console.error('Error fetching interviews:', error);
-        // Fallback to empty array if API fails
-        setInterviews([]);
-      } finally {
-        setLoading(false);
+        console.error('Error fetching analytics:', error);
       }
     };
 
-    fetchInterviews();
-  }, []);
+    if (interviews.length > 0) {
+      fetchAnalytics();
+    }
+  }, [interviews]);
 
-  const filteredInterviews = interviews
-    .filter(interview => filter === 'all' || interview.status === filter)
-    .sort((a, b) => {
-      if (sortBy === 'date') {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      } else {
-        return b.score - a.score;
+  // Filter and sort interviews
+  const processedInterviews = useMemo(() => {
+    const filtered = filterInterviews(interviews, filters);
+    return sortInterviews(filtered, sortBy, sortOrder);
+  }, [interviews, filters, sortBy, sortOrder]);
+
+  // Get stats
+  const stats = useMemo(() => calculateStats(processedInterviews), [processedInterviews]);
+
+  // Get all available topics
+  const availableTopics = useMemo(() => getAllTopics(interviews), [interviews]);
+
+  // Handle export with filters
+  const handleExport = async (format: 'csv' | 'json') => {
+    try {
+      const params = new URLSearchParams({ format });
+      if (filters.status !== 'all') {
+        params.append('status_filter', filters.status);
       }
-    });
-
-  const getStatusColor = (status: string) => {
-    return status === 'approved' 
-      ? 'text-green-600 bg-green-100' 
-      : 'text-red-600 bg-red-100';
+      
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+      const response = await fetch(`${API_BASE}/api/interviews/export?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `interviews_${new Date().toISOString().split('T')[0]}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log(`Exported successfully as ${format.toUpperCase()}`);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   const getStatusIcon = (status: string) => {
     return status === 'approved' ? CheckCircle : XCircle;
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const stats = {
-    total: interviews.length,
-    approved: interviews.filter(i => i.status === 'approved').length,
-    rejected: interviews.filter(i => i.status === 'rejected').length,
-    averageScore: interviews.length > 0 ? Math.round(interviews.reduce((acc, i) => acc + i.score, 0) / interviews.length) : 0
-  };
-
-  if (loading) {
+  // Show clean loading screen only on very first load
+  if (initialLoad && loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-white via-cyan-50 to-violet-50">
         <Navbar theme="light" />
-        <div className="pt-20 flex items-center justify-center min-h-screen">
+        <div className="pt-20 flex items-center justify-center min-h-[80vh]">
           <div className="text-center">
             <motion.div
               animate={{ rotate: 360 }}
@@ -128,25 +202,268 @@ export default function PastInterviewsPage() {
       <div className="pt-20 px-6 py-8">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-8"
-          >
+          <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
               Past <span className="bg-gradient-to-r from-cyan-600 to-violet-600 bg-clip-text text-transparent">Interviews</span>
             </h1>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
               Track your interview progress and performance over time
             </p>
+          </div>
+
+          {/* Action Buttons */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="flex flex-wrap gap-3 mb-8 justify-center"
+          >
+            <button
+              onClick={() => {
+                setRefreshing(true);
+                fetchInterviews();
+              }}
+              disabled={refreshing || loading}
+              className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {refreshing ? (
+                <div className="w-4 h-4 border-2 border-gray-300 border-t-cyan-600 rounded-full animate-spin" />
+              ) : (
+                <Activity className="w-4 h-4" />
+              )}
+              <span>{refreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+            </button>
+            
+            <button
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                showAnalytics
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>{showAnalytics ? 'Hide' : 'Show'} Analytics</span>
+            </button>
+
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Filter className="w-4 h-4" />
+              <span>Filters</span>
+            </button>
+
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => handleExport('csv')}
+                className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export CSV</span>
+              </button>
+              <button
+                onClick={() => handleExport('json')}
+                className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export JSON</span>
+              </button>
+            </div>
           </motion.div>
+
+          {/* Error Banner */}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <XCircle className="w-5 h-5 text-red-500 mr-2" />
+                  <p className="text-red-700">{error}</p>
+                </div>
+                <button
+                  onClick={() => setError(null)}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-8 bg-white rounded-xl p-6 shadow-lg border border-gray-100"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+                <button
+                  onClick={() => setFilters(defaultFilters)}
+                  className="text-sm text-cyan-600 hover:text-cyan-700 font-medium"
+                >
+                  Reset All
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Search */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Search
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={filters.searchQuery}
+                      onChange={(e) => setFilters({ ...filters, searchQuery: e.target.value })}
+                      placeholder="Search interviews..."
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg 
+                                 focus:ring-2 focus:ring-cyan-500 focus:border-transparent
+                                 bg-white text-gray-900 placeholder-gray-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Status Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status
+                  </label>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value as any })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg 
+                               focus:ring-2 focus:ring-cyan-500 focus:border-transparent
+                               bg-white text-gray-900"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="manually_ended">Manually Ended</option>
+                    <option value="timeout">Timeout</option>
+                  </select>
+                </div>
+
+                {/* Interview Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Interview Type
+                  </label>
+                  <select
+                    value={filters.interviewType}
+                    onChange={(e) => setFilters({ ...filters, interviewType: e.target.value as any })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg 
+                               focus:ring-2 focus:ring-cyan-500 focus:border-transparent
+                               bg-white text-gray-900"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="technical">Technical</option>
+                    <option value="resume">Resume</option>
+                  </select>
+                </div>
+
+                {/* Score Range */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Score Range: {filters.scoreRange.min}% - {filters.scoreRange.max}%
+                  </label>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-sm text-gray-600 min-w-[40px]">{filters.scoreRange.min}%</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={filters.scoreRange.min}
+                        onChange={(e) => setFilters({ 
+                          ...filters, 
+                          scoreRange: { ...filters.scoreRange, min: parseInt(e.target.value) }
+                        })}
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer
+                                   [&::-webkit-slider-thumb]:appearance-none
+                                   [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4
+                                   [&::-webkit-slider-thumb]:rounded-full
+                                   [&::-webkit-slider-thumb]:bg-cyan-600
+                                   [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4
+                                   [&::-moz-range-thumb]:rounded-full
+                                   [&::-moz-range-thumb]:bg-cyan-600
+                                   [&::-moz-range-thumb]:border-0"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-sm text-gray-600 min-w-[40px]">{filters.scoreRange.max}%</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={filters.scoreRange.max}
+                        onChange={(e) => setFilters({ 
+                          ...filters, 
+                          scoreRange: { ...filters.scoreRange, max: parseInt(e.target.value) }
+                        })}
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer
+                                   [&::-webkit-slider-thumb]:appearance-none
+                                   [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4
+                                   [&::-webkit-slider-thumb]:rounded-full
+                                   [&::-webkit-slider-thumb]:bg-cyan-600
+                                   [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4
+                                   [&::-moz-range-thumb]:rounded-full
+                                   [&::-moz-range-thumb]:bg-cyan-600
+                                   [&::-moz-range-thumb]:border-0"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Topics Multi-select */}
+                {availableTopics.length > 0 && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Topics
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableTopics.map(topic => (
+                        <button
+                          key={topic}
+                          onClick={() => {
+                            const newTopics = filters.topics.includes(topic)
+                              ? filters.topics.filter(t => t !== topic)
+                              : [...filters.topics, topic];
+                            setFilters({ ...filters, topics: newTopics });
+                          }}
+                          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                            filters.topics.includes(topic)
+                              ? 'bg-cyan-600 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {topic}
+                          {filters.topics.includes(topic) && (
+                            <X className="inline-block w-3 h-3 ml-1" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
 
           {/* Stats Cards */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
           >
             <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
               <div className="flex items-center justify-between">
@@ -182,80 +499,70 @@ export default function PastInterviewsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-500 text-sm font-medium">Average Score</p>
-                  <p className={`text-2xl font-bold ${getScoreColor(stats.averageScore)}`}>{stats.averageScore}%</p>
+                  <p className={`text-2xl font-bold ${getScoreColor(stats.averageScore)}`}>
+                    {stats.averageScore}%
+                  </p>
                 </div>
                 <TrendingUp className="w-8 h-8 text-purple-500" />
               </div>
             </div>
           </motion.div>
 
-          {/* Filters */}
+          {/* Analytics Dashboard */}
+          {showAnalytics && analytics && insights && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8"
+            >
+              <ScoreTrendChart data={analytics.improvement_trend} />
+              <TopicRadarChart data={analytics.topic_performance} />
+              <ScoreDistributionChart distribution={analytics.score_distribution} />
+              <ActivityHeatmap interviews={interviews} />
+              <div className="lg:col-span-2">
+                <PerformanceInsightsPanel 
+                  insights={insights} 
+                  consistencyScore={analytics.consistency_score} 
+                />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Sorting Controls */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="flex flex-wrap gap-4 mb-8"
+            transition={{ delay: 0.3 }}
+            className="flex flex-wrap gap-2 mb-6"
           >
-            <div className="flex gap-2">
+            <span className="text-sm text-gray-600 flex items-center">Sort by:</span>
+            {(['date', 'score', 'duration', 'questions'] as const).map(option => (
               <button
-                onClick={() => setFilter('all')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  filter === 'all'
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setFilter('approved')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  filter === 'approved'
-                    ? 'bg-green-600 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                Approved
-              </button>
-              <button
-                onClick={() => setFilter('rejected')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  filter === 'rejected'
-                    ? 'bg-red-600 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                Rejected
-              </button>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSortBy('date')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  sortBy === 'date'
+                key={option}
+                onClick={() => {
+                  if (sortBy === option) {
+                    setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc');
+                  } else {
+                    setSortBy(option);
+                    setSortOrder('desc');
+                  }
+                }}
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                  sortBy === option
                     ? 'bg-cyan-600 text-white'
                     : 'bg-white text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Sort by Date
+                {option.charAt(0).toUpperCase() + option.slice(1)}
+                {sortBy === option && (sortOrder === 'desc' ? ' ↓' : ' ↑')}
               </button>
-              <button
-                onClick={() => setSortBy('score')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  sortBy === 'score'
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                Sort by Score
-              </button>
-            </div>
+            ))}
           </motion.div>
 
           {/* Interview Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {filteredInterviews.map((interview, index) => {
+            {processedInterviews.map((interview, index) => {
               const StatusIcon = getStatusIcon(interview.status);
               
               return (
@@ -263,7 +570,7 @@ export default function PastInterviewsPage() {
                   key={interview.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 + index * 0.1 }}
+                  transition={{ delay: 0.4 + index * 0.05 }}
                   className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-shadow duration-300"
                 >
                   {/* Card Header */}
@@ -283,13 +590,17 @@ export default function PastInterviewsPage() {
                           <h3 className="font-semibold text-gray-900 capitalize">
                             {interview.type} Interview
                           </h3>
-                          <p className="text-sm text-gray-500">ID: {interview.id}</p>
+                          <p className="text-sm text-gray-500 truncate max-w-[200px]">
+                            ID: {interview.id}
+                          </p>
                         </div>
                       </div>
                       
                       <div className={`flex items-center space-x-2 px-3 py-1 rounded-full ${getStatusColor(interview.status)}`}>
                         <StatusIcon className="w-4 h-4" />
-                        <span className="text-sm font-medium capitalize">{interview.status}</span>
+                        <span className="text-sm font-medium capitalize">
+                          {interview.status.replace('_', ' ')}
+                        </span>
                       </div>
                     </div>
 
@@ -336,8 +647,8 @@ export default function PastInterviewsPage() {
                       </div>
                     </div>
 
-                    {/* Topics (for technical interviews) */}
-                    {interview.topics && (
+                    {/* Topics */}
+                    {interview.topics && interview.topics.length > 0 && (
                       <div className="mb-4">
                         <p className="text-sm text-gray-600 mb-2">Topics:</p>
                         <div className="flex flex-wrap gap-2">
@@ -355,13 +666,15 @@ export default function PastInterviewsPage() {
 
                     {/* Interviewer */}
                     <div className="mb-4">
-                      <p className="text-sm text-gray-600">Interviewer: <span className="text-gray-900 font-medium">{interview.interviewer}</span></p>
+                      <p className="text-sm text-gray-600">
+                        Interviewer: <span className="text-gray-900 font-medium">{interview.interviewer}</span>
+                      </p>
                     </div>
 
                     {/* Feedback */}
                     <div>
                       <p className="text-sm text-gray-600 mb-2">Feedback:</p>
-                      <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">
+                      <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg line-clamp-3">
                         {interview.feedback}
                       </p>
                     </div>
@@ -371,8 +684,20 @@ export default function PastInterviewsPage() {
             })}
           </div>
 
-          {/* Empty State */}
-          {filteredInterviews.length === 0 && (
+          {/* Loading State - Show skeleton while loading */}
+          {loading && processedInterviews.length === 0 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center py-12"
+            >
+              <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full mx-auto mb-4 animate-spin" />
+              <p className="text-gray-600">Loading interviews...</p>
+            </motion.div>
+          )}
+
+          {/* Empty State - Only show when NOT loading and no data */}
+          {!loading && processedInterviews.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -381,24 +706,26 @@ export default function PastInterviewsPage() {
               <Trophy className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">No interviews found</h3>
               <p className="text-gray-600 mb-6">
-                {filter === 'all' 
+                {interviews.length === 0
                   ? "No interview records available. Complete some interviews to see your progress here!"
-                  : `No ${filter} interviews found. Try changing the filter or complete more interviews.`
-                }
+                  : "No interviews match your current filters. Try adjusting your search criteria."}
               </p>
-              <div className="space-y-4">
+              {interviews.length > 0 && (
+                <button
+                  onClick={() => setFilters(defaultFilters)}
+                  className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-violet-600 text-white font-semibold rounded-lg hover:from-cyan-700 hover:to-violet-700 transition-colors"
+                >
+                  Reset Filters
+                </button>
+              )}
+              {interviews.length === 0 && (
                 <a
                   href="/interview"
                   className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-cyan-600 to-violet-600 text-white font-semibold rounded-lg hover:from-cyan-700 hover:to-violet-700 transition-colors"
                 >
                   Start New Interview
                 </a>
-                {interviews.length > 0 && filteredInterviews.length === 0 && (
-                  <p className="text-sm text-gray-500">
-                    Showing {interviews.length} total interviews, but none match your current filter.
-                  </p>
-                )}
-              </div>
+              )}
             </motion.div>
           )}
         </div>
