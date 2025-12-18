@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/interviews/analytics/performance', {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    const response = await fetch(`${API_URL}/api/interviews/analytics/performance`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

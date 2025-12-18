@@ -7,10 +7,12 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const queryString = searchParams.toString();
     
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    
     // Build URL with query parameters
     const backendUrl = queryString 
-      ? `http://127.0.0.1:8000/api/interviews?${queryString}`
-      : 'http://127.0.0.1:8000/api/interviews';
+      ? `${API_URL}/api/interviews?${queryString}`
+      : `${API_URL}/api/interviews`;
     
     // Make a request to the Python backend
     const response = await fetch(backendUrl, {
