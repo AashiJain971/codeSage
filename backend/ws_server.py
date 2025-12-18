@@ -770,6 +770,12 @@ async def get_stats_overview():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/interviews/stats")
+async def get_stats_alias():
+    """Compatibility endpoint used by the frontend; returns the same overview stats."""
+    return await get_stats_overview()
+
+
 @app.get("/api/interviews/analytics/performance")
 async def get_performance_analytics():
     """Get detailed performance analytics including topic breakdown and trends"""
