@@ -1,11 +1,31 @@
-fastapi
-groq
-gTTS
-supabase
-PyAudio
-PyPDF2
-aiofiles
-python-multipart
-numpy
-cryptography
-dotenv
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+websockets==12.0
+python-multipart==0.0.9
+
+# AI/ML
+groq==0.4.1
+
+# Audio Processing (C++ dependencies)
+PyAudio==0.2.14
+webrtcvad==2.0.10
+sounddevice==0.4.6
+soundfile==0.12.1
+numpy==1.26.4
+
+# Text-to-Speech
+gTTS==2.5.1
+
+# Database
+supabase==2.3.4
+
+# File Processing
+PyPDF2==3.0.1
+aiofiles==23.2.1
+
+# Security
+cryptography==42.0.2
+
+# Utilities
+python-dotenv==1.0.0

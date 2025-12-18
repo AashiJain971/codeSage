@@ -27,6 +27,53 @@ from groq import Groq
 # Import database operations
 from database import db
 
+# Initialize FastAPI app
+app = FastAPI(title="CodeSage Backend API")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update with your frontend URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Health check endpoint for Render
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render monitoring"""
+    try:
+        # Verify critical services
+        db_connected = True if db else False
+        groq_available = True if client else False
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "healthy",
+                "service": "codesage-backend",
+                "timestamp": datetime.now().isoformat(),
+                "database": "connected" if db_connected else "disconnected",
+                "groq_api": "available" if groq_available else "unavailable",
+                "dependencies": {
+                    "pyaudio": True,
+                    "webrtcvad": True,
+                    "sounddevice": True,
+                    "soundfile": True,
+                }
+            }
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
 # Initialize Groq client for LLM-based questions
 api_key = os.getenv("GROQ_API_KEY")
 print(f"🔑 API Key status: {'✅ Found' if api_key else '❌ Missing'}")
