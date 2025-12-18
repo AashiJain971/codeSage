@@ -7,6 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from supabase import create_client, Client
+from urllib import request as urlrequest
+from urllib.parse import urlencode
+import json as _json
 from dotenv import load_dotenv
 import time
 
@@ -32,6 +35,66 @@ else:
         supabase = None
 
 
+def _rest_headers() -> Dict[str, str]:
+    return {
+        "apikey": SUPABASE_ANON_KEY or "",
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _rest_get(path: str, params: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None
+
+
+def _rest_post(path: str, payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    body = _json.dumps(payload).encode("utf-8")
+    headers = _rest_headers()
+    headers.update({"Prefer": "return=representation"})
+    req = urlrequest.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urlrequest.urlopen(req, timeout=15) as resp:
+            data = resp.read().decode("utf-8")
+            return _json.loads(data) if data else []
+    except Exception as e:
+        print(f"❌ REST POST failed for {path}: {e}")
+        return None
+
+
+def _rest_patch(path: str, match: Dict[str, str], payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None
+    # Build PostgREST filters like session_id=eq.abc
+    filters = {k: f"eq.{v}" for k, v in match.items()}
+    query = urlencode(filters, doseq=True)
+    url = f"{SUPABASE_URL}/rest/v1/{path}?{query}"
+    body = _json.dumps(payload).encode("utf-8")
+    headers = _rest_headers()
+    headers.update({"Prefer": "return=representation"})
+    req = urlrequest.Request(url, data=body, headers=headers, method="PATCH")
+    try:
+        with urlrequest.urlopen(req, timeout=15) as resp:
+            data = resp.read().decode("utf-8")
+            return _json.loads(data) if data else []
+    except Exception as e:
+        print(f"❌ REST PATCH failed for {path}: {e}")
+        return None
+    query = urlencode(params, doseq=True)
+    url = f"{SUPABASE_URL}/rest/v1/{path}?{query}"
+    req = urlrequest.Request(url, headers=_rest_headers())
+    try:
+        with urlrequest.urlopen(req, timeout=15) as resp:
+            data = resp.read().decode("utf-8")
+            return _json.loads(data)
+    except Exception as e:
+        print(f"❌ REST GET failed for {path}: {e}")
+        return None
+
+
 # Simple cache for interviews to reduce database load
 _interviews_cache = {
     "data": None,
@@ -49,7 +112,28 @@ class InterviewDatabase:
     async def create_interview_session(self, session_data: Dict[str, Any]) -> Optional[str]:
         """Create a new interview session record"""
         if not self.supabase:
-            print("❌ Supabase client not available")
+            # REST fallback for insert
+            print("⚠️ Supabase client not available, using REST insert")
+            try:
+                start_time = session_data.get("start_time")
+                if isinstance(start_time, (int, float)):
+                    start_time = datetime.fromtimestamp(start_time).isoformat()
+                insert_data = {
+                    "session_id": session_data.get("session_id"),
+                    "interview_type": session_data.get("interview_type", "technical"),
+                    "topics": session_data.get("topics", []),
+                    "start_time": start_time,
+                    "status": "in_progress",
+                    "total_questions": session_data.get("total_questions", 0),
+                    "current_question_index": (session_data.get("current_question_index", 0) + 1),
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                rows = _rest_post("interviews", insert_data)
+                if rows:
+                    print(f"✅ REST insert created interview with ID: {rows[0].get('id')}")
+                    return rows[0].get('id')
+            except Exception as e:
+                print(f"❌ REST create_interview_session failed: {e}")
             return None
             
         try:
@@ -120,7 +204,15 @@ class InterviewDatabase:
     async def complete_interview(self, session_id: str, results_data: Dict[str, Any]) -> bool:
         """Mark interview as completed and store results"""
         if not self.supabase:
-            print("❌ Supabase client not available for interview completion")
+            print("⚠️ Supabase client unavailable, using REST update for completion")
+            try:
+                rows = _rest_patch("interviews", {"session_id": session_id}, results_data)
+                if rows is not None and len(rows) > 0:
+                    print(f"✅ REST completion update applied for session: {session_id}")
+                    return True
+                print(f"❌ REST completion update returned no rows for session: {session_id}")
+            except Exception as e:
+                print(f"❌ REST complete_interview failed: {e}")
             return False
             
         try:
@@ -198,6 +290,32 @@ class InterviewDatabase:
     async def get_interview_results(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get interview results by session ID"""
         if not self.supabase:
+            # REST fallback
+            rows = _rest_get("interviews", {
+                "select": "*",
+                "session_id": f"eq.{session_id}",
+                "limit": 1
+            })
+            if rows:
+                interview_data = rows[0]
+                return {
+                    "session_id": interview_data.get("session_id"),
+                    "id": interview_data.get("id"),
+                    "interview_type": interview_data.get("interview_type"),
+                    "topics": interview_data.get("topics") or [],
+                    "total_questions": interview_data.get("total_questions") or 0,
+                    "completed_questions": interview_data.get("completed_questions") or 0,
+                    "average_score": interview_data.get("average_score") or 0,
+                    "individual_scores": interview_data.get("individual_scores") or [],
+                    "duration": interview_data.get("duration") or 0,
+                    "total_time": interview_data.get("duration") or 0,
+                    "start_time": interview_data.get("start_time"),
+                    "end_time": interview_data.get("end_time"),
+                    "status": interview_data.get("status") or interview_data.get("completion_method") or "unknown",
+                    "completion_method": interview_data.get("completion_method"),
+                    "created_at": interview_data.get("created_at"),
+                    "final_results": interview_data.get("final_results") or {}
+                }
             return None
             
         try:
@@ -239,8 +357,17 @@ class InterviewDatabase:
         global _interviews_cache
         
         if not self.supabase:
-            print("❌ Supabase client not available")
-            return []
+            # REST fallback
+            if not SUPABASE_URL:
+                print("❌ Supabase not configured")
+                return []
+            params = {
+                "select": "session_id,interview_type,topics,status,completion_method,total_questions,completed_questions,average_score,duration,created_at",
+                "order": "created_at.desc",
+                "limit": limit,
+            }
+            rows = _rest_get("interviews", params) or []
+            return rows
         
         # Check cache first
         current_time = time.time()

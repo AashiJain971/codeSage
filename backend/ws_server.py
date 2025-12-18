@@ -570,6 +570,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         # Persist upload to a temp file
         suffix = ".wav"
         ct = (file.content_type or "").lower()
+        print(f"[TRANSCRIBE] Content-Type: {ct}")
         if "webm" in ct:
             suffix = ".webm"
         elif "ogg" in ct:
@@ -581,6 +582,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
+            print(f"[TRANSCRIBE] Uploaded bytes: {len(content)}")
+            if not content:
+                raise HTTPException(status_code=400, detail="Empty audio data uploaded")
             tmp.write(content)
             src_path = tmp.name
         
@@ -590,21 +594,32 @@ async def transcribe_audio(file: UploadFile = File(...)):
         if ext != ".wav":
             wav_path = src_path.replace(ext, ".wav")
             try:
-                subprocess.run([
+                proc = subprocess.run([
                     "ffmpeg", "-y", "-i", src_path,
                     "-ac", "1", "-ar", "16000", wav_path
                 ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except Exception as e:
+                print(f"[TRANSCRIBE] ffmpeg conversion OK -> {wav_path} (rc={proc.returncode})")
+            except subprocess.CalledProcessError as e:
+                err = e.stderr.decode("utf-8", errors="ignore") if e.stderr else str(e)
+                print(f"[TRANSCRIBE] ffmpeg error: {err[:500]}")
                 # Cleanup and return error
                 try:
                     os.unlink(src_path)
                 except Exception:
                     pass
-                raise HTTPException(status_code=400, detail=f"Audio conversion failed: {e}")
+                raise HTTPException(status_code=400, detail=f"Audio conversion failed: {err[:300]}")
+            except Exception as e:
+                try:
+                    os.unlink(src_path)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"Audio conversion unexpected error: {e}")
         
         # Transcribe
         try:
+            print(f"[TRANSCRIBE] Starting transcription...")
             transcript = transcribe(wav_path)
+            print(f"[TRANSCRIBE] Transcript length: {len(transcript) if transcript else 0}")
         finally:
             # Cleanup temp files
             for p in [src_path, wav_path]:
@@ -617,6 +632,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[TRANSCRIBE] Server error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
 
