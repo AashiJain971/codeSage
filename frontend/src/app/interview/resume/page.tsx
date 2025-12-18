@@ -79,8 +79,8 @@ export default function ResumeInterviewPage() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const HTTP_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-  const WS_URL = (process.env.NEXT_PUBLIC_WS_URL || 'ws://127.0.0.1:8000') + '/ws';
+  const HTTP_BASE = process.env.NEXT_PUBLIC_API_URL!;
+  const WS_URL = `${process.env.NEXT_PUBLIC_WS_URL}/ws`;
 
   const addLog = (message: string) => {
     setLogs(prev => [...prev, message]);

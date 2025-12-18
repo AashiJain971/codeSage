@@ -409,7 +409,7 @@ export default function TechnicalInterview() {
   };
 
   const downloadResults = (sessionId: string) => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    const API_URL = process.env.NEXT_PUBLIC_API_URL!;
     const downloadUrl = `${API_URL}/download_results/${sessionId}`;
     const link = document.createElement("a");
     link.href = downloadUrl;
@@ -426,8 +426,8 @@ export default function TechnicalInterview() {
     addChatMessage("system", "Initializing AI Interview System...");
 
     try {
-      const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
-      const ws = new WebSocket(`${WS_URL}/ws/technical`);
+      const WS_BASE = process.env.NEXT_PUBLIC_WS_URL!;
+      const ws = new WebSocket(`${WS_BASE}/ws/technical`);
 
       ws.onopen = () => {
         addChatMessage("system", "Connected to AI Interviewer");
