@@ -33,7 +33,7 @@ app = FastAPI(title="CodeSage Backend API")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update with your frontend URL in production
+    allow_origins=["https://codesage-5iht.onrender.com"],  # Update with your frontend URL in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
