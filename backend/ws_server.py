@@ -30,10 +30,14 @@ from database import db
 # Initialize FastAPI app
 app = FastAPI(title="CodeSage Backend API")
 
-# Add CORS middleware
+# Add CORS middleware (allow production and local dev UIs)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://codesage-5iht.onrender.com"],  # Update with your frontend URL in production
+    allow_origins=[
+        "https://codesage-5iht.onrender.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -502,15 +506,7 @@ class TechnicalSession:
 # -----------------------------
 # App setup
 # -----------------------------
-app = FastAPI(title="Interview WebSocket Server")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://codesage-five.vercel.app/", "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Note: App and CORS middleware are initialized once at the top
 
 # -----------------------------
 # In-memory stores
