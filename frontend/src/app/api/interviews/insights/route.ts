@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    console.log('🔧 Insights API DEBUG - API_URL:', API_URL);
+    if (!API_URL) {
+      console.error('❌ NEXT_PUBLIC_API_URL not set for insights!');
+      return NextResponse.json({ strengths: [], areas_for_improvement: [], recommendations: [] }, { status: 200 });
+    }
     const response = await fetch(`${API_URL}/api/interviews/analytics/insights`, {
       method: 'GET',
       headers: {

@@ -82,6 +82,15 @@ export default function ResumeInterviewPage() {
   const HTTP_BASE = process.env.NEXT_PUBLIC_API_URL!;
   const WS_URL = `${process.env.NEXT_PUBLIC_WS_URL}/ws`;
 
+  // Debug: Log env vars on mount
+  useEffect(() => {
+    console.log('🔧 ENV DEBUG:', {
+      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+      NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+      computedWS_URL: WS_URL
+    });
+  }, []);
+
   const addLog = (message: string) => {
     setLogs(prev => [...prev, message]);
   };
@@ -415,6 +424,7 @@ export default function ResumeInterviewPage() {
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     try {
+      console.log('🚀 Connecting to WebSocket at:', WS_URL);
       wsRef.current = new WebSocket(WS_URL);
       
       wsRef.current.onopen = () => {

@@ -7,12 +7,32 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const queryString = searchParams.toString();
     
-    const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    
+    // Debug logging
+    console.log('🔧 API Route DEBUG:', {
+      NEXT_PUBLIC_API_URL: API_URL,
+      queryString: queryString
+    });
+    
+    if (!API_URL) {
+      console.error('❌ NEXT_PUBLIC_API_URL not set!');
+      return NextResponse.json(
+        { 
+          interviews: [], 
+          total: 0,
+          error: 'Backend URL not configured'
+        },
+        { status: 200 }
+      );
+    }
     
     // Build URL with query parameters
     const backendUrl = queryString 
       ? `${API_URL}/api/interviews?${queryString}`
       : `${API_URL}/api/interviews`;
+    
+    console.log('📡 Fetching from:', backendUrl);
     
     // Make a request to the Python backend
     const response = await fetch(backendUrl, {
