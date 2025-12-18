@@ -693,10 +693,11 @@ async def get_interview_results(session_id: str):
 
 @app.get("/api/interviews")
 async def get_all_interviews(limit: int = 50):
-    """Get all interview records from database"""
+    """Get all interview records from database, formatted for frontend"""
     try:
         interviews = await db.get_all_interviews(limit)
-        return {"interviews": interviews, "count": len(interviews)}
+        formatted = [format_interview_data(i) for i in interviews]
+        return {"interviews": formatted, "total": len(formatted)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get interviews: {str(e)}")
 

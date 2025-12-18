@@ -344,14 +344,33 @@ export default function ResumeInterviewPage() {
       }
 
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      // Pick a supported audio mime type across browsers
+      const pickSupportedMime = (): string => {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/ogg;codecs=opus',
+          'audio/mp4',
+          'audio/webm'
+        ];
+        for (const type of candidates) {
+          // @ts-ignore
+          if (typeof MediaRecorder !== 'undefined' && (MediaRecorder as any).isTypeSupported?.(type)) {
+            return type;
+          }
+        }
+        return 'audio/webm';
+      };
+
+      const mimeType = pickSupportedMime();
+      console.log('🎙️ Using recorder mime type:', mimeType);
+      const recorder = new MediaRecorder(stream, { mimeType });
 
       const stopPromise = new Promise<Blob>((resolve, reject) => {
         recorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) chunks.push(e.data);
         };
         recorder.onerror = (e) => reject(e);
-        recorder.onstop = () => resolve(new Blob(chunks, { type: 'audio/webm' }));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
       });
 
       recorder.start();
@@ -363,7 +382,8 @@ export default function ResumeInterviewPage() {
       const blob = await stopPromise;
 
       const form = new FormData();
-      form.append('file', blob, 'answer.webm');
+      const filename = mimeType.includes('mp4') ? 'answer.m4a' : (mimeType.includes('ogg') ? 'answer.ogg' : 'answer.webm');
+      form.append('file', blob, filename);
       const res = await fetch(`${HTTP_BASE}/transcribe_audio`, {
         method: 'POST',
         body: form
