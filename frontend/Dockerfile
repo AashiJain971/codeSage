@@ -17,7 +17,16 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Environment variables
+# Accept build-time env vars from Render and expose them to Next build
+# Render will provide these if marked "Available during build"
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_ENVIRONMENT
+
+# Set as ENV so Next.js can inline them at build time
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+ENV NEXT_PUBLIC_ENVIRONMENT=${NEXT_PUBLIC_ENVIRONMENT}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
