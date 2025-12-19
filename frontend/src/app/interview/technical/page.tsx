@@ -76,6 +76,27 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+// Resolve API/WS endpoints even if env vars are missing at build time
+const getApiBase = () => {
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL !== "undefined") {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "https://codesage-backend-1k6a.onrender.com";
+};
+
+const getWsBase = () => {
+  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL !== "undefined") {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin.replace(/^http/, "ws");
+  }
+  return "wss://codesage-backend-1k6a.onrender.com";
+};
+
 export default function TechnicalInterview() {
   const router = useRouter();
 
@@ -409,7 +430,7 @@ export default function TechnicalInterview() {
   };
 
   const downloadResults = (sessionId: string) => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+    const API_URL = getApiBase();
     const downloadUrl = `${API_URL}/download_results/${sessionId}`;
     const link = document.createElement("a");
     link.href = downloadUrl;
@@ -426,7 +447,7 @@ export default function TechnicalInterview() {
     addChatMessage("system", "Initializing AI Interview System...");
 
     try {
-      const WS_BASE = process.env.NEXT_PUBLIC_WS_URL!;
+      const WS_BASE = getWsBase();
       const ws = new WebSocket(`${WS_BASE}/ws/technical`);
 
       ws.onopen = () => {

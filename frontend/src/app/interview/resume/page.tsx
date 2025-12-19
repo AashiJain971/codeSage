@@ -2,6 +2,27 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../../../components/Navbar';
+
+// Resolve API/WS endpoints even if env vars are missing at build time
+const getApiBase = () => {
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL !== "undefined") {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "https://codesage-backend-1k6a.onrender.com";
+};
+
+const getWsBase = () => {
+  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL !== "undefined") {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.origin.replace(/^http/, "ws");
+  }
+  return "wss://codesage-backend-1k6a.onrender.com";
+};
 import { FileText, Upload, Mic, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send, X, MessageSquare } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -79,8 +100,8 @@ export default function ResumeInterviewPage() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const HTTP_BASE = process.env.NEXT_PUBLIC_API_URL!;
-  const WS_URL = `${process.env.NEXT_PUBLIC_WS_URL}/ws`;
+  const HTTP_BASE = getApiBase();
+  const WS_URL = `${getWsBase()}/ws`;
 
   // Debug: Log env vars on mount
   useEffect(() => {
