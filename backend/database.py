@@ -31,7 +31,9 @@ else:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         print("✅ Supabase client initialized successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize Supabase client: {e}")
+        print(f"❌ Failed to initialize Supabase client: {e.__class__.__name__}: {e}")
+        print("🔍 Supabase init traceback follows:")
+        traceback.print_exc()
         supabase = None
 
 
