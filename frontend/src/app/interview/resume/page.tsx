@@ -551,59 +551,94 @@ export default function ResumeInterviewPage() {
       window.speechSynthesis.cancel();
     }
     
-    setPhaseStatus('Speaking...');
+    setPhaseStatus('AI is speaking...');
+    
     try {
-      if (!('speechSynthesis' in window)) {
-        console.log('⚠️ speechSynthesis not available in window');
-        setTimeout(startServerVAD, 400);
-        return;
-      }
-      
+      console.log('🎶 Creating speech utterance...');
       const utterance = new SpeechSynthesisUtterance(text);
-      // Normal speech rate for natural delivery
-      utterance.rate = 1.0; // Normal speed
+      
+      // Speech settings
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
+      utterance.lang = 'en-US';
+      
+      console.log('🎶 Utterance created successfully');
       
       setIsSpeaking(true);
-      
       const startTime = Date.now();
       
       utterance.onstart = () => {
         const elapsed = Date.now() - startTime;
-        console.log(`🗣️ Speech started in ${elapsed}ms`);
+        console.log(`🗣️ Speech started successfully in ${elapsed}ms`);
+        setPhaseStatus('AI is speaking...');
       };
       
       utterance.onend = () => {
-        console.log('✅ Speech synthesis ended');
+        const duration = Date.now() - startTime;
+        console.log(`✅ Speech ended after ${duration}ms`);
         setIsSpeaking(false);
-        
-        // Record when speech ended for cooldown tracking
         setLastSpeechEndTime(Date.now());
         
-        // OPTIMIZED: Reduced delay from 2000ms to 800ms for faster VAD start
+        // Start VAD after speech completes
+        console.log('🎯 Scheduling VAD start in 800ms...');
         setTimeout(() => {
-          console.log('🎯 Starting VAD after 800ms delay (optimized)');
+          console.log('🎯 Starting VAD now');
           startServerVAD();
-        }, 800); // Reduced from 2000ms
+        }, 800);
       };
       
       utterance.onerror = (e) => {
         console.error('❌ Speech synthesis error:', e);
+        console.error('  - Error type:', e.error);
+        console.error('  - Character index:', e.charIndex);
         setIsSpeaking(false);
+        addLog('⚠️ Speech error - starting voice recording anyway');
         
-        // Still start VAD even on error, but with delay
+        // Still start VAD even on error
         setTimeout(() => {
+          console.log('🎯 Starting VAD after speech error');
           startServerVAD();
         }, 500);
       };
       
+      // Get available voices and select the best one
+      const voices = window.speechSynthesis.getVoices();
+      console.log('🎤 Available voices:', voices.length);
+      if (voices.length > 0) {
+        // Try to find an English voice
+        const englishVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+        utterance.voice = englishVoice;
+        console.log('🎤 Selected voice:', englishVoice.name, englishVoice.lang);
+      } else {
+        console.warn('⚠️ No voices available yet, using default');
+      }
+      
+      console.log('📢 Calling window.speechSynthesis.speak()...');
       window.speechSynthesis.speak(utterance);
-      console.log('📢 Speech synthesis speak() called');
+      console.log('📢 speak() called successfully');
+      
+      // Force resume in case it's paused (Safari issue)
+      setTimeout(() => {
+        if (window.speechSynthesis.paused) {
+          console.log('▶️ Resuming paused speech synthesis');
+          window.speechSynthesis.resume();
+        }
+      }, 100);
+      
+      // Failsafe: If speech doesn't start in 3 seconds, start VAD anyway
+      setTimeout(() => {
+        if (!window.speechSynthesis.speaking && isSpeaking) {
+          console.warn('⚠️ Speech did not start - forcing VAD');
+          setIsSpeaking(false);
+          startServerVAD();
+        }
+      }, 3000);
       
     } catch (e) {
       console.error('❌ Error in speakAndThenRecord:', e);
       setIsSpeaking(false);
+      addLog('⚠️ Could not speak - question: ' + text.substring(0, 100));
       setTimeout(startServerVAD, 500);
     }
   };
@@ -1354,6 +1389,30 @@ export default function ResumeInterviewPage() {
   useEffect(() => {
     // Auto-connect when component mounts
     connectWebSocket();
+    
+    // Load speech synthesis voices
+    if ('speechSynthesis' in window) {
+      console.log('🎤 Initializing speech synthesis...');
+      
+      // Load voices
+      const loadVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        console.log('🎤 Loaded', voices.length, 'voices');
+        if (voices.length > 0) {
+          console.log('🎤 Sample voices:', voices.slice(0, 3).map(v => `${v.name} (${v.lang})`));
+        }
+      };
+      
+      // Chrome loads voices asynchronously
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
+      
+      // Try loading immediately too
+      loadVoices();
+    } else {
+      console.error('❌ Speech synthesis not supported in this browser');
+    }
   }, []);
 
   useEffect(() => {
