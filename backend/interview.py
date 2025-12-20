@@ -102,13 +102,31 @@ def transcribe(path: str) -> str:
                 response_format="text"
             )
         
+        print(f"🔍 Transcription result type: {type(result)}")
+        print(f"🔍 Transcription result: {result}")
+        
         # Handle both object and string responses
+        transcript = ""
         if isinstance(result, str):
             transcript = result.strip()
+            print(f"📝 Got string result: {transcript[:100]}...")
+        elif hasattr(result, 'text'):
+            transcript = result.text.strip()
+            print(f"📝 Got object with .text: {transcript[:100]}...")
+        elif hasattr(result, '__dict__'):
+            # Try to get text from object attributes
+            print(f"📋 Result attributes: {result.__dict__}")
+            transcript = str(getattr(result, 'text', getattr(result, 'transcript', result))).strip()
         else:
-            transcript = getattr(result, "text", "").strip()
+            # Last resort: convert to string
+            transcript = str(result).strip()
+            print(f"📝 Converted result to string: {transcript[:100]}...")
         
-        print(f"📝 Transcription successful: {transcript[:100]}...")
+        if not transcript or len(transcript) < 2:
+            print("⚠️ Transcription returned empty or very short result")
+            return ""
+        
+        print(f"✅ Transcription successful: {transcript[:100]}...")
         return transcript
         
     except Exception as e:
@@ -126,7 +144,7 @@ def transcribe(path: str) -> str:
         elif "timeout" in error_msg.lower():
             return "[Transcription error: API request timeout]"
         else:
-            return f"[Transcription error: {error_type}]"
+            return f"[Transcription error: {error_type} - {error_msg[:100]}]"
 
 # --- LLM Interview Brain ---
 def interviewer_reply(candidate: str, context: list) -> dict:
