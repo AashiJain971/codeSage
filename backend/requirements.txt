@@ -18,7 +18,8 @@ numpy==1.26.4
 gTTS==2.5.1
 
 # Database
-supabase==2.3.4
+supabase==2.10.0
+httpx==0.27.2
 
 # File Processing
 PyPDF2==3.0.1

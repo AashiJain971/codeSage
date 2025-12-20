@@ -1,6 +1,7 @@
 """
 Database configuration and operations for Supabase
 """
+import traceback
 import os
 import json
 import uuid
