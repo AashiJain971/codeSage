@@ -241,7 +241,7 @@ export default function TechnicalInterview() {
     );
   };
 
-  const discussApproach = () => {
+  const discussApproach = async () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       addChatMessage("system", "WebSocket connection not available");
       return;
@@ -253,29 +253,144 @@ export default function TechnicalInterview() {
       setHintTimer(null);
     }
 
-    addChatMessage("system", "Starting approach discussion...");
-    wsRef.current.send(
-      JSON.stringify({
-        type: "record_audio",
-        question: currentQuestion,
-      })
-    );
+    addChatMessage("system", "🎤 Recording your approach...");
     setIsRecordingApproach(true);
+
+    try {
+      // Get audio stream from camera (which already has audio enabled)
+      let stream = cameraStreamRef.current;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      }
+
+      const chunks: BlobPart[] = [];
+      const pickSupportedMime = (): string => {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4'
+        ];
+        for (const type of candidates) {
+          if (typeof MediaRecorder !== 'undefined' && (MediaRecorder as any).isTypeSupported?.(type)) {
+            return type;
+          }
+        }
+        return 'audio/webm';
+      };
+
+      const mimeType = pickSupportedMime();
+      console.log('🎙️ Using recorder mime type:', mimeType);
+      const recorder = new MediaRecorder(stream, { mimeType });
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        console.log('🎵 Audio blob created, size:', blob.size, 'bytes');
+
+        if (blob.size === 0) {
+          addChatMessage("system", "❌ No audio recorded");
+          setIsRecordingApproach(false);
+          return;
+        }
+
+        // Send to transcription API
+        const HTTP_BASE = getApiBase();
+        const form = new FormData();
+        const filename = mimeType.includes('mp4') ? 'approach.m4a' : 
+                         (mimeType.includes('ogg') ? 'approach.ogg' : 'approach.webm');
+        form.append('file', blob, filename);
+
+        try {
+          addChatMessage("system", "Processing your approach...");
+          console.log('📤 Sending approach audio to transcribe endpoint...');
+          const res = await fetch(`${HTTP_BASE}/transcribe_audio`, {
+            method: 'POST',
+            body: form,
+          });
+
+          console.log('📡 Transcribe API response status:', res.status);
+
+          if (!res.ok) {
+            const errorText = await res.text();
+            console.error('❌ Transcription API error:', errorText);
+            addChatMessage("system", `⚠️ Transcription failed: ${res.statusText}`);
+            setIsRecordingApproach(false);
+            return;
+          }
+
+          const data = await res.json();
+          console.log('📝 Transcription response:', data);
+
+          const transcript = typeof data?.transcript === 'string' ? data.transcript.trim() : '';
+
+          if (!transcript) {
+            addChatMessage("system", "⚠️ No speech detected - please try again");
+            setIsRecordingApproach(false);
+            return;
+          }
+
+          // Show user's transcript
+          addChatMessage("user", transcript);
+
+          // Send transcript to WebSocket for AI analysis
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: "voice_approach",
+              transcript: transcript,
+              question: currentQuestion
+            }));
+          }
+
+          setIsRecordingApproach(false);
+        } catch (error) {
+          console.error('❌ Transcription error:', error);
+          addChatMessage("system", `❌ Error: ${error}`);
+          setIsRecordingApproach(false);
+        }
+      };
+
+      recorder.start();
+      console.log('🎙️ Recording started');
+
+      // Store recorder for manual stop
+      (window as any)._currentRecorder = recorder;
+
+    } catch (e) {
+      console.error('❌ Recording start failed:', e);
+      addChatMessage("system", `❌ Recording failed: ${e}`);
+      setIsRecordingApproach(false);
+    }
   };
 
   const stopApproachDiscussion = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addChatMessage("system", "WebSocket connection not available");
+    const recorder = (window as any)._currentRecorder;
+
+    if (!recorder || recorder.state !== 'recording') {
+      addChatMessage("system", "No active recording found");
+      setIsRecordingApproach(false);
       return;
     }
 
-    addChatMessage("system", "Stopping approach discussion...");
-    wsRef.current.send(
-      JSON.stringify({
-        type: "stop_recording",
-      })
-    );
-    setIsRecordingApproach(false);
+    try {
+      console.log('🛑 Stopping recording...');
+      recorder.stop();
+      delete (window as any)._currentRecorder;
+    } catch (e) {
+      console.error('❌ Stop recording failed:', e);
+      addChatMessage("system", `❌ Stop failed: ${e}`);
+      setIsRecordingApproach(false);
+    }
   };
 
   const submitCode = () => {
