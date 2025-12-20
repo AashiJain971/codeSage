@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import requests
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -82,40 +83,45 @@ def say(text: str, filename="out.mp3"):
 
 # --- STT with Groq Whisper ---
 def transcribe(path: str) -> str:
-    """Transcribe audio file to text using Groq Whisper"""
-    if not client:
-        print("❌ Groq client not available for transcription")
-        error_msg = "API client not initialized - check GROQ_API_KEY"
-        return f"[Transcription error: {error_msg}]"
+    """Transcribe audio file to text using Groq Whisper API"""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        print("❌ Groq API key not available for transcription")
+        return "[Transcription error: API key not found]"
     
     try:
         print(f"📁 Transcribing file: {path}")
         print(f"📏 File size: {os.path.getsize(path)} bytes")
         
-        # Read file content
+        # Use Groq's REST API for audio transcription
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        
         with open(path, "rb") as audio_file:
-            print(f"📦 Reading audio file...")
+            files = {
+                "file": (os.path.basename(path), audio_file, "audio/wav")
+            }
+            data = {
+                "model": "whisper-large-v3",
+                "response_format": "json"
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
             
-            # Correct Groq API call for transcription
-            # The Groq Python SDK uses a different structure
-            transcription = client.audio.transcriptions.create(
-                file=audio_file,
-                model="whisper-large-v3",
-                response_format="json"
-            )
+            print(f"📤 Sending request to Groq Whisper API...")
+            response = requests.post(url, files=files, data=data, headers=headers, timeout=30)
         
-        print(f"🔍 Transcription response type: {type(transcription)}")
+        print(f"📡 Response status: {response.status_code}")
         
-        # Extract text from response
-        transcript = ""
-        if isinstance(transcription, str):
-            transcript = transcription.strip()
-        elif isinstance(transcription, dict):
-            transcript = transcription.get('text', '').strip()
-        elif hasattr(transcription, 'text'):
-            transcript = transcription.text.strip()
-        else:
-            transcript = str(transcription).strip()
+        if response.status_code != 200:
+            error_msg = response.text[:200]
+            print(f"❌ API error: {error_msg}")
+            return f"[Transcription error: API returned {response.status_code}]"
+        
+        result = response.json()
+        print(f"🔍 Response: {result}")
+        
+        transcript = result.get('text', '').strip()
         
         if not transcript or len(transcript) < 2:
             print("⚠️ Transcription returned empty or very short result")
@@ -124,14 +130,13 @@ def transcribe(path: str) -> str:
         print(f"✅ Transcription successful: {transcript[:100]}...")
         return transcript
         
-    except AttributeError as e:
-        error_msg = str(e)
-        print(f"❌ Groq API AttributeError: {error_msg}")
-        print(f"💡 Client type: {type(client)}")
-        print(f"💡 Client attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}")
-        import traceback
-        traceback.print_exc()
-        return f"[Transcription error: Groq API not properly configured - {error_msg[:80]}]"
+    except requests.exceptions.Timeout:
+        print("❌ Request timeout")
+        return "[Transcription error: API request timeout]"
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Request error: {e}")
+        return f"[Transcription error: Network error - {str(e)[:80]}]"
         
     except Exception as e:
         error_type = type(e).__name__
@@ -140,13 +145,10 @@ def transcribe(path: str) -> str:
         import traceback
         traceback.print_exc()
         
-        # Return more specific error message
-        if "api" in error_msg.lower() or "key" in error_msg.lower() or "auth" in error_msg.lower():
-            return "[Transcription error: Groq API authentication failed]"
+        if "auth" in error_msg.lower() or "key" in error_msg.lower():
+            return "[Transcription error: API authentication failed]"
         elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
             return "[Transcription error: API quota exceeded]"
-        elif "timeout" in error_msg.lower():
-            return "[Transcription error: API request timeout]"
         else:
             return f"[Transcription error: {error_type} - {error_msg[:100]}]"
 
