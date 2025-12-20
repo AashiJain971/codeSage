@@ -351,6 +351,17 @@ export default function ResumeInterviewPage() {
   // Record mic locally and send transcript to backend
   const recordAndSendAnswer = async () => {
     console.log('🎤 Starting audio recording and transcription process...');
+    console.log('🌐 API Base URL:', HTTP_BASE);
+    console.log('🌐 Transcribe endpoint:', `${HTTP_BASE}/transcribe_audio`);
+    
+    // Test backend connectivity first
+    try {
+      const healthCheck = await fetch(`${HTTP_BASE}/health`, { method: 'GET' });
+      console.log('🏥 Backend health check:', healthCheck.ok ? '✅ Healthy' : '❌ Unhealthy');
+    } catch (e) {
+      console.warn('⚠️ Backend health check failed (might still work):', e);
+    }
+    
     addLog('🎤 Recording your response...');
     
     try {
@@ -416,25 +427,76 @@ export default function ResumeInterviewPage() {
       const form = new FormData();
       const filename = mimeType.includes('mp4') ? 'answer.m4a' : (mimeType.includes('ogg') ? 'answer.ogg' : 'answer.webm');
       form.append('file', blob, filename);
-      const res = await fetch(`${HTTP_BASE}/transcribe_audio`, {
-        method: 'POST',
-        body: form
-      });
+      
+      console.log('📤 Sending audio to transcribe endpoint...');
+      console.log('  - Endpoint:', `${HTTP_BASE}/transcribe_audio`);
+      console.log('  - Blob size:', blob.size, 'bytes');
+      console.log('  - MIME type:', mimeType);
+      console.log('  - Filename:', filename);
+      
+      let res;
+      try {
+        res = await fetch(`${HTTP_BASE}/transcribe_audio`, {
+          method: 'POST',
+          body: form
+        });
+      } catch (fetchError) {
+        console.error('❌ Network error during transcribe request:', fetchError);
+        addLog(`⚠️ Network error: ${fetchError instanceof Error ? fetchError.message : 'Unable to reach server'}`);
+        setPhaseStatus('');
+        return;
+      }
       
       console.log('📡 Transcribe API response status:', res.status, res.statusText);
+      console.log('📡 Response headers:', Object.fromEntries(res.headers.entries()));
       
       if (!res.ok) {
-        const errorText = await res.text().catch(() => 'Unknown error');
-        console.error('❌ Transcribe failed:', res.status, res.statusText, errorText);
-        addLog('⚠️ Transcription failed - please try speaking again');
+        let errorDetails = 'Unknown error';
+        try {
+          const errorData = await res.json();
+          errorDetails = errorData.detail || JSON.stringify(errorData);
+        } catch {
+          errorDetails = await res.text().catch(() => 'Unable to parse error');
+        }
+        console.error('❌ Transcribe API failed:');
+        console.error('  - Status:', res.status, res.statusText);
+        console.error('  - Error:', errorDetails);
+        addLog(`⚠️ Transcription API error (${res.status}): ${errorDetails.substring(0, 100)}`);
         setPhaseStatus('');
         return;
       }
       
       const data = await res.json();
-      console.log('📝 Transcription response data:', data);
+      console.log('📝 Transcription API response:');
+      console.log('  - Full data:', data);
+      console.log('  - Has transcript key:', 'transcript' in data);
+      console.log('  - Transcript type:', typeof data?.transcript);
+      console.log('  - Raw transcript value:', data?.transcript);
+      console.log('  - Transcript length:', data?.transcript?.length || 0);
       
       const transcript = (data?.transcript || '').trim();
+      
+      // Check if transcript is actually an error message from backend
+      const errorPatterns = [
+        '[Transcription',
+        'unavailable',
+        'failed',
+        'API client not initialized',
+        'please try again',
+        'error'
+      ];
+      
+      const isErrorMessage = errorPatterns.some(pattern => 
+        transcript.toLowerCase().includes(pattern.toLowerCase())
+      );
+      
+      if (isErrorMessage) {
+        console.error('❌ Backend returned error in transcript field:', transcript);
+        addLog(`⚠️ Backend error: ${transcript}`);
+        addLog('💡 This might be a Groq API issue or audio processing problem');
+        setPhaseStatus('');
+        return;
+      }
       
       if (!transcript) {
         console.log('🤫 No transcript returned from API');
