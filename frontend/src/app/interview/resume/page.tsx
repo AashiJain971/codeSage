@@ -350,6 +350,9 @@ export default function ResumeInterviewPage() {
 
   // Record mic locally and send transcript to backend
   const recordAndSendAnswer = async () => {
+    console.log('🎤 Starting audio recording and transcription process...');
+    addLog('🎤 Recording your response...');
+    
     try {
       // Ensure we have an audio stream
       let stream = cameraStream;
@@ -401,6 +404,14 @@ export default function ResumeInterviewPage() {
       }, 6000);
 
       const blob = await stopPromise;
+      console.log('🎵 Audio blob created, size:', blob.size, 'bytes, type:', blob.type);
+      
+      if (blob.size === 0) {
+        console.error('❌ Audio blob is empty - no audio recorded');
+        addLog('⚠️ No audio captured - please check microphone permissions');
+        setPhaseStatus('');
+        return;
+      }
 
       const form = new FormData();
       const filename = mimeType.includes('mp4') ? 'answer.m4a' : (mimeType.includes('ogg') ? 'answer.ogg' : 'answer.webm');
@@ -409,25 +420,47 @@ export default function ResumeInterviewPage() {
         method: 'POST',
         body: form
       });
+      
+      console.log('📡 Transcribe API response status:', res.status, res.statusText);
+      
       if (!res.ok) {
-        console.error('❌ Transcribe failed:', res.statusText);
+        const errorText = await res.text().catch(() => 'Unknown error');
+        console.error('❌ Transcribe failed:', res.status, res.statusText, errorText);
+        addLog('⚠️ Transcription failed - please try speaking again');
         setPhaseStatus('');
         return;
       }
+      
       const data = await res.json();
+      console.log('📝 Transcription response data:', data);
+      
       const transcript = (data?.transcript || '').trim();
+      
       if (!transcript) {
-        console.log('🤫 No transcript returned');
+        console.log('🤫 No transcript returned from API');
+        addLog('⚠️ No speech detected - please speak louder and clearer');
         setPhaseStatus('');
         return;
       }
-
+      
+      console.log('✅ Transcript received successfully:', transcript);
+      
       // Send to backend as a normal answer to continue interview
-      wsRef.current?.send(JSON.stringify({ type: 'answer', text: transcript }));
-      addLog('You: ' + transcript);
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'answer', text: transcript }));
+        addLog('You: ' + transcript);
+        console.log('📤 Sent transcript to backend via WebSocket');
+      } else {
+        console.error('❌ WebSocket not connected, cannot send transcript');
+        addLog('⚠️ Connection lost - transcript: ' + transcript);
+      }
+      
       setPhaseStatus('');
     } catch (e) {
       console.error('❌ Error recording/transcribing:', e);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      console.error('📋 Error details:', errorMessage);
+      addLog('❌ Recording failed: ' + errorMessage);
       setPhaseStatus('');
     }
   };
