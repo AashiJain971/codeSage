@@ -92,35 +92,30 @@ def transcribe(path: str) -> str:
         print(f"📁 Transcribing file: {path}")
         print(f"📏 File size: {os.path.getsize(path)} bytes")
         
-        with open(path, "rb") as f:
-            file_content = f.read()
-            print(f"📦 Read {len(file_content)} bytes from file")
+        # Read file content
+        with open(path, "rb") as audio_file:
+            print(f"📦 Reading audio file...")
             
-            result = client.audio.transcriptions.create(
-                file=(os.path.basename(path), file_content),
-                model="whisper-large-v3-turbo",
-                response_format="text"
+            # Correct Groq API call for transcription
+            # The Groq Python SDK uses a different structure
+            transcription = client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-large-v3",
+                response_format="json"
             )
         
-        print(f"🔍 Transcription result type: {type(result)}")
-        print(f"🔍 Transcription result: {result}")
+        print(f"🔍 Transcription response type: {type(transcription)}")
         
-        # Handle both object and string responses
+        # Extract text from response
         transcript = ""
-        if isinstance(result, str):
-            transcript = result.strip()
-            print(f"📝 Got string result: {transcript[:100]}...")
-        elif hasattr(result, 'text'):
-            transcript = result.text.strip()
-            print(f"📝 Got object with .text: {transcript[:100]}...")
-        elif hasattr(result, '__dict__'):
-            # Try to get text from object attributes
-            print(f"📋 Result attributes: {result.__dict__}")
-            transcript = str(getattr(result, 'text', getattr(result, 'transcript', result))).strip()
+        if isinstance(transcription, str):
+            transcript = transcription.strip()
+        elif isinstance(transcription, dict):
+            transcript = transcription.get('text', '').strip()
+        elif hasattr(transcription, 'text'):
+            transcript = transcription.text.strip()
         else:
-            # Last resort: convert to string
-            transcript = str(result).strip()
-            print(f"📝 Converted result to string: {transcript[:100]}...")
+            transcript = str(transcription).strip()
         
         if not transcript or len(transcript) < 2:
             print("⚠️ Transcription returned empty or very short result")
@@ -128,6 +123,15 @@ def transcribe(path: str) -> str:
         
         print(f"✅ Transcription successful: {transcript[:100]}...")
         return transcript
+        
+    except AttributeError as e:
+        error_msg = str(e)
+        print(f"❌ Groq API AttributeError: {error_msg}")
+        print(f"💡 Client type: {type(client)}")
+        print(f"💡 Client attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}")
+        import traceback
+        traceback.print_exc()
+        return f"[Transcription error: Groq API not properly configured - {error_msg[:80]}]"
         
     except Exception as e:
         error_type = type(e).__name__
@@ -137,7 +141,7 @@ def transcribe(path: str) -> str:
         traceback.print_exc()
         
         # Return more specific error message
-        if "api" in error_msg.lower() or "key" in error_msg.lower():
+        if "api" in error_msg.lower() or "key" in error_msg.lower() or "auth" in error_msg.lower():
             return "[Transcription error: Groq API authentication failed]"
         elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
             return "[Transcription error: API quota exceeded]"
