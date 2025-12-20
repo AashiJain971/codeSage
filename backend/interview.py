@@ -85,12 +85,19 @@ def transcribe(path: str) -> str:
     """Transcribe audio file to text using Groq Whisper"""
     if not client:
         print("❌ Groq client not available for transcription")
-        return "[Transcription unavailable - API client not initialized]"
+        error_msg = "API client not initialized - check GROQ_API_KEY"
+        return f"[Transcription error: {error_msg}]"
     
     try:
+        print(f"📁 Transcribing file: {path}")
+        print(f"📏 File size: {os.path.getsize(path)} bytes")
+        
         with open(path, "rb") as f:
+            file_content = f.read()
+            print(f"📦 Read {len(file_content)} bytes from file")
+            
             result = client.audio.transcriptions.create(
-                file=(path, f.read()),
+                file=(os.path.basename(path), file_content),
                 model="whisper-large-v3-turbo",
                 response_format="text"
             )
@@ -105,10 +112,21 @@ def transcribe(path: str) -> str:
         return transcript
         
     except Exception as e:
-        print(f"❌ Transcription error: {e}")
+        error_type = type(e).__name__
+        error_msg = str(e)
+        print(f"❌ Transcription error ({error_type}): {error_msg}")
         import traceback
         traceback.print_exc()
-        return "[Transcription failed - please try again]"
+        
+        # Return more specific error message
+        if "api" in error_msg.lower() or "key" in error_msg.lower():
+            return "[Transcription error: Groq API authentication failed]"
+        elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
+            return "[Transcription error: API quota exceeded]"
+        elif "timeout" in error_msg.lower():
+            return "[Transcription error: API request timeout]"
+        else:
+            return f"[Transcription error: {error_type}]"
 
 # --- LLM Interview Brain ---
 def interviewer_reply(candidate: str, context: list) -> dict:

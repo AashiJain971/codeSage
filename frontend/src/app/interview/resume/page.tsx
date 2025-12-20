@@ -452,16 +452,35 @@ export default function ResumeInterviewPage() {
       
       if (!res.ok) {
         let errorDetails = 'Unknown error';
+        let userMessage = 'Transcription failed';
         try {
           const errorData = await res.json();
           errorDetails = errorData.detail || JSON.stringify(errorData);
+          
+          // Parse specific errors for user-friendly messages
+          if (errorDetails.includes('API client not initialized') || errorDetails.includes('GROQ_API_KEY')) {
+            userMessage = 'Server configuration error - Groq API not set up';
+          } else if (errorDetails.includes('API authentication failed') || errorDetails.includes('api')) {
+            userMessage = 'Groq API authentication failed';
+          } else if (errorDetails.includes('quota exceeded') || errorDetails.includes('limit')) {
+            userMessage = 'API quota exceeded - please try again later';
+          } else if (errorDetails.includes('Audio conversion failed') || errorDetails.includes('invalid format')) {
+            userMessage = 'Audio format not supported - please check microphone';
+          } else if (errorDetails.includes('timeout')) {
+            userMessage = 'Request timeout - please try again';
+          } else if (errorDetails.includes('too small') || errorDetails.includes('empty')) {
+            userMessage = 'No audio detected - please speak louder';
+          } else {
+            userMessage = `Server error: ${errorDetails.substring(0, 80)}`;
+          }
         } catch {
           errorDetails = await res.text().catch(() => 'Unable to parse error');
         }
+        
         console.error('❌ Transcribe API failed:');
         console.error('  - Status:', res.status, res.statusText);
         console.error('  - Error:', errorDetails);
-        addLog(`⚠️ Transcription API error (${res.status}): ${errorDetails.substring(0, 100)}`);
+        addLog(`⚠️ ${userMessage}`);
         setPhaseStatus('');
         return;
       }
@@ -474,7 +493,7 @@ export default function ResumeInterviewPage() {
       console.log('  - Raw transcript value:', data?.transcript);
       console.log('  - Transcript length:', data?.transcript?.length || 0);
       
-      const transcript = (data?.transcript || '').trim();
+      const transcript = typeof data?.transcript === 'string' ? data.transcript.trim() : '';
       
       // Check if transcript is actually an error message from backend
       const errorPatterns = [

@@ -567,73 +567,108 @@ async def upload_resume(file: UploadFile = File(...)):
 async def transcribe_audio(file: UploadFile = File(...)):
     """Accept an uploaded audio blob (webm/wav/ogg/mp3), convert to wav if needed, and return transcript."""
     try:
+        # Check if client is available
+        if not client:
+            print("[TRANSCRIBE] ❌ Groq client not initialized")
+            raise HTTPException(
+                status_code=500, 
+                detail="Groq API client not initialized - check GROQ_API_KEY environment variable"
+            )
+        
         # Persist upload to a temp file
         suffix = ".wav"
         ct = (file.content_type or "").lower()
         print(f"[TRANSCRIBE] Content-Type: {ct}")
+        print(f"[TRANSCRIBE] Filename: {file.filename}")
+        
         if "webm" in ct:
             suffix = ".webm"
         elif "ogg" in ct:
             suffix = ".ogg"
         elif "mp3" in ct:
             suffix = ".mp3"
-        elif "m4a" in ct:
+        elif "m4a" in ct or "mp4" in ct:
             suffix = ".m4a"
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
             print(f"[TRANSCRIBE] Uploaded bytes: {len(content)}")
-            if not content:
-                raise HTTPException(status_code=400, detail="Empty audio data uploaded")
+            if not content or len(content) < 100:
+                raise HTTPException(status_code=400, detail="Audio file too small or empty")
             tmp.write(content)
             src_path = tmp.name
+        
+        print(f"[TRANSCRIBE] Saved to temp file: {src_path}")
         
         # If not wav, convert to wav via ffmpeg
         ext = os.path.splitext(src_path)[1].lower()
         wav_path = src_path
         if ext != ".wav":
             wav_path = src_path.replace(ext, ".wav")
+            print(f"[TRANSCRIBE] Converting {ext} to WAV...")
             try:
                 proc = subprocess.run([
                     "ffmpeg", "-y", "-i", src_path,
-                    "-ac", "1", "-ar", "16000", wav_path
-                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                print(f"[TRANSCRIBE] ffmpeg conversion OK -> {wav_path} (rc={proc.returncode})")
+                    "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le",
+                    wav_path
+                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+                print(f"[TRANSCRIBE] ✅ ffmpeg conversion OK -> {wav_path}")
+                print(f"[TRANSCRIBE] WAV file size: {os.path.getsize(wav_path)} bytes")
+            except subprocess.TimeoutExpired:
+                print(f"[TRANSCRIBE] ❌ ffmpeg timeout")
+                try:
+                    os.unlink(src_path)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail="Audio conversion timeout")
             except subprocess.CalledProcessError as e:
                 err = e.stderr.decode("utf-8", errors="ignore") if e.stderr else str(e)
-                print(f"[TRANSCRIBE] ffmpeg error: {err[:500]}")
-                # Cleanup and return error
+                print(f"[TRANSCRIBE] ❌ ffmpeg error: {err[:500]}")
                 try:
                     os.unlink(src_path)
                 except Exception:
                     pass
-                raise HTTPException(status_code=400, detail=f"Audio conversion failed: {err[:300]}")
+                raise HTTPException(status_code=400, detail=f"Audio conversion failed - invalid format")
             except Exception as e:
+                print(f"[TRANSCRIBE] ❌ ffmpeg unexpected error: {e}")
                 try:
                     os.unlink(src_path)
                 except Exception:
                     pass
-                raise HTTPException(status_code=400, detail=f"Audio conversion unexpected error: {e}")
+                raise HTTPException(status_code=500, detail=f"Audio conversion error: {str(e)[:100]}")
         
         # Transcribe
         try:
-            print(f"[TRANSCRIBE] Starting transcription...")
+            print(f"[TRANSCRIBE] Starting Groq Whisper transcription...")
             transcript = transcribe(wav_path)
+            print(f"[TRANSCRIBE] Raw transcript: {transcript}")
             print(f"[TRANSCRIBE] Transcript length: {len(transcript) if transcript else 0}")
+            
+            # Check if transcript is an error message
+            if transcript.startswith("[Transcription"):
+                print(f"[TRANSCRIBE] ⚠️ Transcription returned error: {transcript}")
+                raise HTTPException(status_code=500, detail=transcript)
+                
         finally:
             # Cleanup temp files
             for p in [src_path, wav_path]:
                 try:
-                    os.unlink(p)
-                except Exception:
-                    pass
+                    if os.path.exists(p):
+                        os.unlink(p)
+                        print(f"[TRANSCRIBE] Cleaned up: {p}")
+                except Exception as cleanup_err:
+                    print(f"[TRANSCRIBE] Cleanup warning: {cleanup_err}")
         
+        print(f"[TRANSCRIBE] ✅ Success - returning transcript")
         return {"transcript": transcript}
+        
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[TRANSCRIBE] Server error: {e}")
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+        print(f"[TRANSCRIBE] ❌ Unexpected server error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)[:200]}")
 
 
 @app.post("/save_interview_results")
