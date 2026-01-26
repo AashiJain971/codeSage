@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import Navbar from '../../components/Navbar';
+import ProtectedRoute from '../../components/ProtectedRoute';
+import { useAuth } from '@/contexts/AuthContext';
+import { getApiBase, authenticatedFetch } from '@/lib/api';
 import ScoreTrendChart from '../../components/charts/ScoreTrendChart';
 import TopicRadarChart from '../../components/charts/TopicRadarChart';
 import ScoreDistributionChart from '../../components/charts/ScoreDistributionChart';
@@ -26,7 +29,8 @@ import {
   defaultFilters
 } from '../../utils/interviewUtils';
 
-export default function PastInterviewsPage() {
+function PastInterviewsPage() {
+  const { getToken } = useAuth();
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true); // Track first load
@@ -48,6 +52,14 @@ export default function PastInterviewsPage() {
     setError(null);
     
     try {
+      // Get authentication token
+      const token = await getToken();
+      if (!token) {
+        setError('Not authenticated. Please login.');
+        setLoading(false);
+        return;
+      }
+      
       // Build query params for server-side filtering
       const params = new URLSearchParams();
       params.append('page', '1');
@@ -66,7 +78,11 @@ export default function PastInterviewsPage() {
         params.append('max_score', filters.scoreRange.max.toString());
       }
       
-      const response = await fetch(`/api/interviews?${params.toString()}`);
+      const apiBase = getApiBase();
+      const response = await authenticatedFetch(
+        `${apiBase}/api/interviews?${params.toString()}`,
+        token
+      );
       
       if (!response.ok) {
         throw new Error('Failed to fetch interviews');
@@ -731,5 +747,13 @@ export default function PastInterviewsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PastInterviewsPageWrapper() {
+  return (
+    <ProtectedRoute>
+      <PastInterviewsPage />
+    </ProtectedRoute>
   );
 }

@@ -50,8 +50,7 @@ const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
                 </span>
               </h1>
               <p className="hero-subtitle text-base sm:text-lg lg:text-xl">
-                Experience the future of interview practice with AI-powered mock interviews, 
-                intelligent feedback, and personalized learning paths.
+                AI-led interviews that convert candidate responses into structured hiring intelligence.
               </p>
               <div className="hero-buttons flex flex-col sm:flex-row gap-4 mt-6 sm:mt-8">
                 <button onClick={onTakeInterview} className="btn btn-primary glow-on-hover w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-4 text-sm sm:text-base min-h-[48px]">
@@ -72,7 +71,7 @@ const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
                       <circle cx="12" cy="12" r="9"></circle>
                     </svg>
                   </div>
-                  <span>AI Analysis</span>
+                  <span>Interview Intelligence</span>
                 </div>
                 
                 <div className="floating-card card-2">
@@ -82,7 +81,7 @@ const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
                       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
                     </svg>
                   </div>
-                  <span>Smart Feedback</span>
+                  <span>Explainable AI Feedback</span>
                 </div>
                 
                 <div className="floating-card card-3">
@@ -91,7 +90,7 @@ const Hero = ({ onTakeInterview, onViewResults, onGoHome }: HeroProps) => {
                       <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"></polyline>
                     </svg>
                   </div>
-                  <span>Performance Tracking</span>
+                  <span>Candidate Signal Tracking</span>
                 </div>
                 
                 <div className="hero-main-visual">

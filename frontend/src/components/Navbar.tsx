@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
+import { LogOut } from 'lucide-react';
 import './Navbar.css';
 
 interface NavbarProps {
@@ -12,6 +14,7 @@ interface NavbarProps {
 const Navbar = ({ theme = 'light' }: NavbarProps) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -60,6 +63,16 @@ const Navbar = ({ theme = 'light' }: NavbarProps) => {
                 {link.label}
               </Link>
             ))}
+            {user && (
+              <button
+                onClick={signOut}
+                className="nav-link flex items-center space-x-2 text-red-600 hover:text-red-700"
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sign Out</span>
+              </button>
+            )}
           </div>
 
           <div className="navbar-mobile">

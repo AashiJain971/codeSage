@@ -2,12 +2,13 @@
 FastAPI backend for CodeSage Interview System
 Comprehensive API endpoints for interview data, analytics, and exports
 """
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from database import db
+from auth_middleware import get_current_user
 import json
 import io
 import csv
@@ -99,6 +100,7 @@ async def root():
 
 @app.get("/api/interviews")
 async def get_interviews(
+    user_id: str = Depends(get_current_user),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     status_filter: Optional[str] = Query(None),
@@ -109,11 +111,11 @@ async def get_interviews(
     end_date: Optional[str] = Query(None)
 ):
     """
-    Get all interviews with pagination and filtering
+    Get all interviews for the authenticated user with pagination and filtering
     """
     try:
-        # Fetch all interviews from database
-        all_interviews = await db.get_all_interviews(limit=1000)
+        # Fetch all interviews for this user from database
+        all_interviews = await db.get_user_interviews(user_id, limit=1000)
         
         if not all_interviews:
             return {

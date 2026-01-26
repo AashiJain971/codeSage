@@ -112,8 +112,8 @@ class InterviewDatabase:
     def __init__(self):
         self.supabase = supabase
         
-    async def create_interview_session(self, session_data: Dict[str, Any]) -> Optional[str]:
-        """Create a new interview session record"""
+    async def create_interview_session(self, session_data: Dict[str, Any], user_id: str) -> Optional[str]:
+        """Create a new interview session record with user authentication"""
         if not self.supabase:
             # REST fallback for insert
             print("⚠️ Supabase client not available, using REST insert")
@@ -123,6 +123,7 @@ class InterviewDatabase:
                     start_time = datetime.fromtimestamp(start_time).isoformat()
                 insert_data = {
                     "session_id": session_data.get("session_id"),
+                    "user_id": user_id,
                     "interview_type": session_data.get("interview_type", "technical"),
                     "topics": session_data.get("topics", []),
                     "start_time": start_time,
@@ -147,6 +148,7 @@ class InterviewDatabase:
             
             insert_data = {
                 "session_id": session_data.get("session_id"),
+                "user_id": user_id,
                 "interview_type": session_data.get("interview_type", "technical"),
                 "topics": session_data.get("topics", []),
                 # Store start_time as ISO string (if provided) or NULL
@@ -243,6 +245,8 @@ class InterviewDatabase:
                 "end_time": end_time,
                 "duration": total_time,
                 "completed_questions": results_data.get("completed_questions", 0),
+                "total_questions": results_data.get("completed_questions", 0),  # Update total with actual count
+                "current_question_index": results_data.get("current_question_index", 0),
                 "average_score": average_score,
                 "individual_scores": individual_scores,
                 # Store the complete results payload for audit
@@ -355,8 +359,44 @@ class InterviewDatabase:
             print(f"❌ Error getting interview results: {e}")
             return None
     
+    async def get_user_interviews(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get all interview records for a specific user"""
+        if not self.supabase:
+            # REST fallback
+            if not SUPABASE_URL:
+                print("❌ Supabase not configured")
+                return []
+            params = {
+                "select": "session_id,interview_type,topics,status,completion_method,total_questions,completed_questions,average_score,duration,created_at,final_results,individual_scores,start_time,end_time",
+                "user_id": f"eq.{user_id}",
+                "order": "created_at.desc",
+                "limit": limit,
+            }
+            rows = _rest_get("interviews", params) or []
+            return rows
+            
+        try:
+            print(f"🔍 Fetching {limit} interviews for user {user_id}...")
+            
+            result = self.supabase.table("interviews").select(
+                "session_id, interview_type, topics, status, completion_method, "
+                "total_questions, completed_questions, average_score, "
+                "duration, created_at, final_results, individual_scores, start_time, end_time"
+            ).eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+            
+            if result.data:
+                print(f"✅ Retrieved {len(result.data)} interviews for user")
+                return result.data
+            else:
+                print("⚠️ No interviews found for this user")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error getting user interviews: {e}")
+            return []
+    
     async def get_all_interviews(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get all interview records with optional limit"""
+        """Get all interview records with optional limit (admin use only)"""
         global _interviews_cache
         
         if not self.supabase:

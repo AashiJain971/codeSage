@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import Navbar from '../../components/Navbar';
+import ProtectedRoute from '../../components/ProtectedRoute';
 
-export default function InterviewPage() {
+function InterviewPage() {
   const router = useRouter();
 
   const selectInterviewType = (selectedMode: 'technical' | 'resume') => {
@@ -126,5 +127,13 @@ export default function InterviewPage() {
         </div>
       
     </div>
+  );
+}
+
+export default function InterviewPageWrapper() {
+  return (
+    <ProtectedRoute>
+      <InterviewPage />
+    </ProtectedRoute>
   );
 }

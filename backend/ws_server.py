@@ -11,6 +11,8 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 from dotenv import load_dotenv
+import jwt
+from jwt import PyJWTError
 
 load_dotenv()
 
@@ -26,6 +28,9 @@ from groq import Groq
 
 # Import database operations
 from database import db
+
+# Get JWT secret for token verification
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
 # Initialize FastAPI app
 app = FastAPI(title="CodeSage Backend API")
@@ -177,6 +182,33 @@ def generate_technical_question(topics: List[str], difficulty: str = "medium") -
         
     topics_str = ", ".join(topics)
     
+    # Retry logic for LLM call
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"🔄 Retry attempt {attempt + 1}/{max_retries}")
+                import time
+                time.sleep(1)  # Wait 1 second before retry
+            
+            return _generate_question_with_llm(topics, topics_str, difficulty)
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                # Final attempt failed, use fallback
+                print("❌ All retries exhausted, using fallback")
+                raise
+    
+    # Should not reach here, but just in case
+    raise Exception("Question generation failed after all retries")
+
+
+def _generate_question_with_llm(topics: List[str], topics_str: str, difficulty: str) -> dict:
+    """
+    Internal function to generate question with LLM (separated for retry logic)
+    """
+    import json
+    
     prompt = f"""
 You are a senior technical interviewer. Generate a coding interview question as a JSON object.
 
@@ -214,7 +246,8 @@ Format your response exactly like this (no extra text, no markdown):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,  # Very low temperature for consistent formatting
-            max_tokens=600
+            max_tokens=800,  # Increased from 600 to ensure complete questions
+            timeout=30  # 30 second timeout to avoid hanging
         )
         
         response_content = response.choices[0].message.content
@@ -266,7 +299,9 @@ Format your response exactly like this (no extra text, no markdown):
         return question_data
             
     except Exception as e:
-        print(f"Error generating question: {e}")
+        print(f"❌ Error generating question: {e}")
+        import traceback
+        traceback.print_exc()
         # Fallback to a simple question
         return {
             "question": f"Write a function to solve a {difficulty} problem related to {topics_str}. Explain your approach first.",
@@ -281,9 +316,10 @@ Format your response exactly like this (no extra text, no markdown):
 # Technical Interview Session Management
 # -----------------------------
 class TechnicalSession:
-    def __init__(self, topics: List[str]):
-        print(f"🏁 Initializing TechnicalSession with topics: {topics}")
+    def __init__(self, topics: List[str], user_id: str):
+        print(f"🏁 Initializing TechnicalSession with topics: {topics} for user: {user_id}")
         self.topics = topics
+        self.user_id = user_id
         self.questions = []
         self.current_question_index = 0
         self.session_id = str(uuid.uuid4())
@@ -298,40 +334,96 @@ class TechnicalSession:
         self.final_evaluation = None  # Store detailed LLM evaluation
         self.question_submitted = False  # Track if current question was already submitted
         self.interview_id = None  # Will be set when creating database record
+        self.discussion_turns = 0  # Track number of discussion interactions
+        self.clarification_questions = 0  # Track number of clarification questions asked
+        self.questions_ready = False  # Track if questions have been generated
         
         print(f"🔧 Client status: {'✅ Available' if client else '❌ Not available'}")
-        
+        print(f"🎯 Session initialization complete (questions will be generated asynchronously)")
+    
+    async def generate_questions_async(self):
+        """Generate questions asynchronously to avoid blocking the WebSocket"""
         # Generate questions using LLM based on selected topics
-        difficulties = ["easy", "medium", "medium", "hard"]  # Progressive difficulty
+        difficulties = ["easy", "medium", "hard", "very hard"]  # Progressive difficulty - all different
         print(f"📝 Starting to generate {len(difficulties)} questions...")
+        
+        generated_questions_text = []  # Track question text to avoid duplicates
         
         for i, difficulty in enumerate(difficulties):
             if i < 4:  # Generate up to 4 questions
                 print(f"📝 Generating question {i+1}/{len(difficulties)} (difficulty: {difficulty})")
-                try:
-                    question = generate_technical_question(topics, difficulty)
-                    question['id'] = i + 1
-                    self.questions.append(question)
-                    print(f"✅ Question {i+1} generated successfully: {question.get('question', 'Unknown')[:70]}...")
-                except Exception as e:
-                    print(f"❌ Failed to generate question {i+1}: {e}")
-                    # Add fallback question
-                    fallback_question = {
-                        "id": i + 1,
-                        "question": f"Write a function to solve a {difficulty} problem related to {', '.join(topics)}. Explain your approach.",
-                        "difficulty": difficulty,
-                        "topics": topics,
-                        "hints": ["Think step by step", "Consider edge cases"],
-                        "test_cases": [{"input": "example", "output": "result", "explanation": "test"}],
-                        "evaluation_criteria": ["Correctness", "Approach"]
-                    }
-                    self.questions.append(fallback_question)
-                    print(f"🔄 Added fallback question {i+1}")
+                
+                # Add small delay between requests to avoid rate limiting
+                if i > 0:
+                    await asyncio.sleep(0.3)  # 300ms delay between question generations
+                
+                max_retries = 3
+                for retry in range(max_retries):
+                    try:
+                        # Run in executor to avoid blocking
+                        loop = asyncio.get_event_loop()
+                        question = await loop.run_in_executor(
+                            None, 
+                            generate_technical_question, 
+                            self.topics, 
+                            difficulty
+                        )
+                        
+                        question_text = question.get('question', '')
+                        
+                        # Check for duplicate questions
+                        is_duplicate = False
+                        for existing_q in generated_questions_text:
+                            # Simple similarity check - if 80% of words match, consider duplicate
+                            existing_words = set(existing_q.lower().split())
+                            new_words = set(question_text.lower().split())
+                            if len(existing_words) > 0 and len(new_words) > 0:
+                                overlap = len(existing_words.intersection(new_words))
+                                similarity = overlap / max(len(existing_words), len(new_words))
+                                if similarity > 0.8:
+                                    is_duplicate = True
+                                    print(f"⚠️ Duplicate detected (similarity: {similarity:.2f}), regenerating...")
+                                    break
+                        
+                        if not is_duplicate:
+                            question['id'] = i + 1
+                            question['question_number'] = i + 1  # Explicit question number
+                            self.questions.append(question)
+                            generated_questions_text.append(question_text)
+                            print(f"✅ Question {i+1} generated successfully: {question_text[:70]}...")
+                            break  # Success, exit retry loop
+                        elif retry < max_retries - 1:
+                            print(f"🔄 Retrying question {i+1} (attempt {retry+2}/{max_retries})...")
+                            await asyncio.sleep(0.5)  # Wait before retry
+                        else:
+                            print(f"⚠️ Max retries reached, using fallback for question {i+1}")
+                            raise Exception("Max retries for unique question")
+                            
+                    except Exception as e:
+                        if retry == max_retries - 1:
+                            print(f"❌ Failed to generate question {i+1} after {max_retries} attempts: {e}")
+                            # Add fallback question with unique content
+                            fallback_question = {
+                                "id": i + 1,
+                                "question_number": i + 1,
+                                "question": f"Question {i+1}: Write a {difficulty}-level function related to {', '.join(self.topics)}. Requirements: Handle edge cases, optimize for time complexity, and explain your approach.",
+                                "difficulty": difficulty,
+                                "topics": self.topics,
+                                "hints": ["Think step by step", "Consider edge cases", "What's the time complexity?"],
+                                "test_cases": [{"input": "example", "output": "result", "explanation": "test"}],
+                                "evaluation_criteria": ["Correctness", "Efficiency", "Code quality"]
+                            }
+                            self.questions.append(fallback_question)
+                            generated_questions_text.append(fallback_question['question'])
+                            print(f"🔄 Added unique fallback question {i+1}")
+                            break
         
-        print(f"🎯 Session initialization complete. Generated {len(self.questions)} questions")
+        self.questions_ready = True
+        print(f"🎯 Question generation complete. Generated {len(self.questions)} unique questions")
+        print(f"📋 Question difficulties: {[q.get('difficulty') for q in self.questions]}")
         
-        # Initialize database record asynchronously
-        asyncio.create_task(self._initialize_database_record())
+        # Initialize database record
+        await self._initialize_database_record()
     
     async def _initialize_database_record(self):
         """Initialize the database record for this interview session"""
@@ -344,7 +436,7 @@ class TechnicalSession:
                 "total_questions": len(self.questions)
             }
             
-            self.interview_id = await db.create_interview_session(session_data)
+            self.interview_id = await db.create_interview_session(session_data, self.user_id)
             if self.interview_id:
                 print(f"✅ Database record created with interview_id: {self.interview_id}")
             else:
@@ -472,6 +564,10 @@ class TechnicalSession:
         self.approach_discussed = False
         self.question_submitted = False  # Reset for new question
         
+        # Reset per-question counters
+        self.discussion_turns = 0
+        self.clarification_questions = 0
+        
         # Update progress in database
         asyncio.create_task(self.update_progress_in_db())
         
@@ -491,6 +587,14 @@ class TechnicalSession:
             "timestamp": time.time(),
             "question_id": self.current_question_index + 1
         })
+        
+        # Track discussion metrics
+        self.discussion_turns += 1
+        
+        # Detect clarification questions (contains '?', 'what', 'how', 'why', 'can you', etc.)
+        transcript_lower = transcript.lower()
+        if '?' in transcript or any(word in transcript_lower for word in ['what', 'how', 'why', 'can you', 'could you', 'explain', 'clarify']):
+            self.clarification_questions += 1
     
     def add_code_submission(self, code: str, language: str):
         """Track code submissions for analysis"""
@@ -502,6 +606,68 @@ class TechnicalSession:
             "hints_used_so_far": self.hints_used
         })
 
+
+# -----------------------------
+# Scoring Helpers
+# -----------------------------
+def extract_score_from_evaluation(evaluation_text: str) -> int:
+    """
+    Extract numerical score from LLM evaluation text.
+    Expected formats: "Rating: 7/10" or "Score: 85/100" or standalone numbers
+    Returns: integer score (0-100 scale)
+    """
+    import re
+    
+    if not evaluation_text:
+        print("⚠️ No evaluation text provided, returning default score 50")
+        return 50  # Default neutral score
+    
+    print(f"🔍 Extracting score from evaluation: '{evaluation_text[:150]}...'")
+    
+    # Try to find "X/10" or "X/100" patterns
+    match = re.search(r'(\d+)\s*/\s*(\d+)', evaluation_text)
+    if match:
+        score, max_score = int(match.group(1)), int(match.group(2))
+        # Normalize to 100-point scale
+        normalized = int((score / max_score) * 100)
+        final_score = min(100, max(0, normalized))  # Clamp to 0-100
+        print(f"✅ Extracted {score}/{max_score} -> normalized to {final_score}/100")
+        return final_score
+    
+    # Look for "Rating: X" or "Score: X" patterns
+    match = re.search(r'(?:rating|score)\s*:?\s*(\d{1,3})', evaluation_text, re.IGNORECASE)
+    if match:
+        score = int(match.group(1))
+        if score <= 10:
+            final_score = min(100, max(0, score * 10))  # Convert 0-10 scale to 0-100
+            print(f"✅ Extracted rating {score}/10 -> {final_score}/100")
+            return final_score
+        elif score <= 100:
+            final_score = min(100, max(0, score))
+            print(f"✅ Extracted score {final_score}/100")
+            return final_score
+    
+    # Fallback: look for standalone numbers that might be scores
+    match = re.search(r'\b([0-9])\s*/\s*10\b', evaluation_text)  # Match "8 / 10" format more explicitly
+    if match:
+        score = int(match.group(1)) * 10
+        print(f"✅ Extracted X/10 format -> {score}/100")
+        return score
+    
+    # Last resort: look for any number between 0-10 or 0-100
+    numbers = re.findall(r'\b(\d{1,3})\b', evaluation_text)
+    for num_str in numbers:
+        num = int(num_str)
+        if 0 <= num <= 10:
+            final_score = num * 10
+            print(f"🔄 Fallback: Found number {num}, assuming 0-10 scale -> {final_score}/100")
+            return final_score
+        elif 0 <= num <= 100:
+            print(f"🔄 Fallback: Found number {num}, assuming 0-100 scale")
+            return num
+    
+    print("❌ No score found in evaluation, returning default 60")
+    return 60  # Slightly above neutral default if no score found
 
 # -----------------------------
 # App setup
@@ -1072,6 +1238,60 @@ async def export_interviews(
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
+    
+    # Extract and verify authentication token from query params
+    user_id = None
+    try:
+        # Get token from query parameter
+        query_params = dict(ws.query_params)
+        token = query_params.get("token")
+        
+        if not token:
+            await ws.send_text(json.dumps({
+                "type": "error",
+                "error": "Authentication required. Please login first."
+            }))
+            await ws.close(code=1008, reason="Authentication required")
+            return
+        
+        # Verify JWT token
+        if SUPABASE_JWT_SECRET and SUPABASE_JWT_SECRET != "your-jwt-secret-from-supabase-dashboard-settings-api":
+            print("🔐 Verifying JWT token with secret...")
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+        else:
+            # Fallback: decode without verification (development only)
+            print("⚠️ WARNING: JWT verification disabled - using fallback mode")
+            payload = jwt.decode(token, options={"verify_signature": False})
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise Exception("Invalid token: missing user ID")
+        
+        print(f"✅ Resume WebSocket authenticated for user: {user_id}")
+        
+    except PyJWTError as e:
+        print(f"❌ JWT Error in resume WebSocket: {e}")
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "error": f"Invalid authentication token: {str(e)}"
+        }))
+        await ws.close(code=1008, reason="Invalid token")
+        return
+    except Exception as e:
+        print(f"❌ Authentication error in resume WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "error": f"Authentication failed: {str(e)}"
+        }))
+        await ws.close(code=1008, reason="Authentication failed")
+        return
 
     session = {
         "prompt": None,
@@ -1079,7 +1299,10 @@ async def ws_endpoint(ws: WebSocket):
         "session_id": None,
         "interview_id": None,
         "start_time": None,
-        "mode": None
+        "mode": None,
+        "user_id": user_id,
+        "individual_scores": [],  # Track scores for each question
+        "last_question_time": None  # Track time for each question
     }
 
     try:
@@ -1156,6 +1379,7 @@ async def ws_endpoint(ws: WebSocket):
                     start_time = time.time()
                     session["session_id"] = session_id
                     session["start_time"] = start_time
+                    session["last_question_time"] = start_time  # Initialize for first question timing
                     session["mode"] = mode
                     session["resume_id"] = resume_id
                     
@@ -1165,11 +1389,12 @@ async def ws_endpoint(ws: WebSocket):
                         "interview_type": "resume",
                         "topics": ["Resume-Based"],
                         "start_time": start_time,
-                        "total_questions": 0  # Will be determined dynamically
+                        "total_questions": 10  # Estimate - will be updated on completion with actual count
                     }
-                    interview_id = await db.create_interview_session(session_data)
+                    interview_id = await db.create_interview_session(session_data, user_id)
                     session["interview_id"] = interview_id
                     print(f"✅ Resume interview session created: {session_id} (DB ID: {interview_id})")
+                    print(f"📊 Session state after init: session_id={session['session_id']}, interview_id={session['interview_id']}")
                     
                     resume_text = resume_store[resume_id]
                     # Resume-based prompt. Avoid f-string so JSON braces remain literal.
@@ -1219,11 +1444,31 @@ You are conducting a live mock job interview with the candidate, using their res
 ### Response Format:
 Always reply in JSON:
 {
-  "evaluation": "Brief feedback on the candidate's last response.",
+  "evaluation": "Brief feedback on the candidate's last response. MUST include a rating in format 'Rating: X/10' where X is 0-10.",
   "next_question": "Your next question for the candidate.",
   "hint": "Optional hint if asked.",
   "final_feedback": "Only include this at the end."
 }
+
+### Evaluation Scoring:
+For EVERY candidate response, evaluate based on these criteria and assign a score 0-10:
+
+**Evaluation Criteria:**
+1. Technical/Role Knowledge (30%): Does the answer demonstrate relevant technical skills or role-specific expertise mentioned in their resume?
+2. Depth & Examples (25%): Does the candidate provide specific examples, details, or go beyond surface-level explanations?
+3. Resume Relevance (20%): Does the answer align with what's stated in their resume? Are they expanding appropriately on resume content?
+4. Clarity of Communication (15%): Is the explanation clear, well-structured, and easy to understand?
+5. Candidate Initiative (10%): Does the candidate show proactivity, self-correction, or thoughtful discussion beyond just answering?
+
+**Score Scale:**
+- Include "Rating: X/10" in your evaluation field for EVERY response
+- 0-3/10: Poor (off-topic, vague, contradicts resume, unclear, passive)
+- 4-5/10: Below Average (partially correct but missing key details, lacks depth, some inconsistencies)
+- 6-7/10: Good (correct and clear, matches resume, adequate explanation)
+- 8-9/10: Excellent (detailed with examples, insightful, demonstrates strong expertise, proactive)
+- 10/10: Outstanding (goes beyond expectations, exceptional depth, shows leadership/innovation)
+
+**Important:** Always include "Rating: X/10" in the evaluation text.
 
 Resume:
 """ + resume_text
@@ -1246,25 +1491,142 @@ Resume:
                         "type": "error", "error": "Session not initialized. Send 'init' first."
                     }))
                     continue
+                    
+                print(f"\n📝 ANSWER HANDLER - Processing text answer")
+                print(f"Session state: session_id={session.get('session_id')}, interview_id={session.get('interview_id')}")
+                print(f"Mode: {session.get('mode')}")
+                
                 candidate = msg.get("text", "").strip()
                 if not candidate:
+                    print("⚠️  Empty answer received")
                     await ws.send_text(json.dumps({
                         "type": "error", "error": "Empty answer text"
                     }))
                     continue
 
-                # Validate transcript
+                print(f"Candidate response: '{candidate[:100]}...'") 
+                
+                # Validate transcript - but be lenient
                 if not transcript_is_valid(candidate):
-                    await ws.send_text(json.dumps({
-                        "type": "error", "error": "Invalid transcript. Please speak more clearly."
-                    }))
-                    continue
+                    print(f"⚠️  Invalid transcript (too short or garbled): '{candidate}'")
+                    # Still allow single-word answers in case user said "yes", "no", etc.
+                    if len(candidate.split()) == 0:
+                        await ws.send_text(json.dumps({
+                            "type": "error", "error": "Invalid transcript. Please speak more clearly."
+                        }))
+                        continue
+                    # If it's just short, allow it through
+                    print(f"ℹ️  Allowing short response: '{candidate}'")
 
+                print("🤖 Getting LLM response...")
                 reply = interviewer_reply(candidate, session["conversation"])
-                session["conversation"].append({
-                    "candidate": candidate,
-                    **reply
-                })
+                print(f"LLM reply keys: {list(reply.keys())}")
+                
+                # Extract score from evaluation for resume interviews
+                if session.get("mode") == "resume":
+                    evaluation_text = reply.get("evaluation", "")
+                    print(f"\n📊 SCORE EXTRACTION - Resume Interview")
+                    print(f"Full evaluation text: '{evaluation_text}'")
+                    
+                    score = extract_score_from_evaluation(evaluation_text)
+                    print(f"🎯 Final extracted score: {score}/100")
+                    
+                    # Calculate time taken for this question
+                    current_time = time.time()
+                    time_taken = int(current_time - session.get("last_question_time", current_time))
+                    print(f"⏱️ Time taken: {time_taken}s")
+                    
+                    # Get next question for proper storage
+                    next_question = reply.get("next_question", "Follow-up question")
+                    
+                    # Store in conversation with score
+                    conversation_entry = {
+                        "candidate": candidate,
+                        "score": score,
+                        "time_taken": time_taken,
+                        "evaluation": evaluation_text,
+                        "next_question": next_question,
+                        **reply
+                    }
+                    session["conversation"].append(conversation_entry)
+                    print(f"Added to conversation: Q#{len(session['conversation'])}")
+                    
+                    # Track score
+                    session["individual_scores"].append(score)
+                    print(f"Individual scores so far: {session['individual_scores']}")
+                    
+                    # Store in database (question_responses table)
+                    print(f"\n💾 DATABASE STORAGE ATTEMPT")
+                    print(f"session_id: {session.get('session_id')}")
+                    print(f"interview_id: {session.get('interview_id')}")
+                    
+                    if session.get("session_id") and session.get("interview_id"):
+                        question_index = len(session["conversation"])
+                        
+                        # Derive difficulty from score and response depth
+                        response_length = len(candidate.split())
+                        if score >= 80 and response_length > 50:
+                            difficulty = "advanced"
+                        elif score >= 60 and response_length > 30:
+                            difficulty = "intermediate"
+                        else:
+                            difficulty = "conversational"
+                        
+                        # Get the PREVIOUS question (what was asked) not the next question
+                        if len(session["conversation"]) > 1:
+                            prev_entry = session["conversation"][-2]
+                            question_text = prev_entry.get("next_question", "Previous question")
+                        else:
+                            # First question
+                            question_text = "Thanks for sharing your resume. Could you give a brief overview of your background?"
+                        
+                        question_data = {
+                            "question": question_text,
+                            "user_response": candidate,
+                            "score": score,
+                            "feedback": evaluation_text,
+                            "time_taken": time_taken,
+                            "hints_used": 0,
+                            "difficulty": difficulty
+                        }
+                        
+                        print(f"Question #{question_index} data:")
+                        print(f"  - Question: '{question_text[:80]}...'")
+                        print(f"  - Response: '{candidate[:80]}...'")
+                        print(f"  - Score: {score}")
+                        print(f"  - Difficulty: {difficulty}")
+                        print(f"  - Time: {time_taken}s")
+                        print(f"  - Feedback length: {len(evaluation_text)} chars")
+                        
+                        try:
+                            db_result = await db.store_question_response(
+                                session["session_id"],
+                                question_index,
+                                question_data
+                            )
+                            if db_result:
+                                print(f"✅ STORED to database: Q#{question_index} (score={score}, difficulty={difficulty})")
+                            else:
+                                print(f"❌ Database store returned False for Q#{question_index}")
+                        except Exception as e:
+                            print(f"❌ Failed to store Q&A: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print("❌ SKIPPING database storage - missing session_id or interview_id")
+                        print(f"  session_id: {session.get('session_id')}")
+                        print(f"  interview_id: {session.get('interview_id')}")
+                    
+                    # Reset time for next question
+                    session["last_question_time"] = current_time
+                    print(f"Updated last_question_time for next question\n")
+                else:
+                    # Technical interviews don't use this path
+                    session["conversation"].append({
+                        "candidate": candidate,
+                        **reply
+                    })
+                
                 await ws.send_text(json.dumps({"type": "assessment", **reply}))
 
             elif mtype == "code_submission":
@@ -1273,20 +1635,129 @@ Resume:
                         "type": "error", "error": "Session not initialized. Send 'init' first."
                     }))
                     continue
+                    
+                print(f"\n💻 CODE SUBMISSION HANDLER - Processing code")
+                print(f"Session state: session_id={session.get('session_id')}, interview_id={session.get('interview_id')}")
+                
                 code = msg.get("code", "").strip()
                 if not code:
+                    print("⚠️ Empty code submission")
                     await ws.send_text(json.dumps({
                         "type": "error", "error": "Empty code submission"
                     }))
                     continue
 
+                print(f"Code length: {len(code)} characters, {len(code.split(chr(10)))} lines")
+
                 # Process code submission like a regular answer
                 candidate_message = f"[Code Submission]\n{code}"
+                print("🤖 Getting LLM evaluation for code...")
                 reply = interviewer_reply(candidate_message, session["conversation"])
-                session["conversation"].append({
-                    "candidate": candidate_message,
-                    **reply
-                })
+                print(f"LLM reply keys: {list(reply.keys())}")
+                
+                # Extract score from evaluation for resume interviews
+                if session.get("mode") == "resume":
+                    evaluation_text = reply.get("evaluation", "")
+                    print(f"\n📊 SCORE EXTRACTION - Code Submission")
+                    print(f"Full evaluation: '{evaluation_text}'")
+                    
+                    score = extract_score_from_evaluation(evaluation_text)
+                    print(f"🎯 Final code score: {score}/100")
+                    
+                    # Calculate time taken
+                    current_time = time.time()
+                    time_taken = int(current_time - session.get("last_question_time", current_time))
+                    print(f"⏱️ Time taken: {time_taken}s")
+                    
+                    # Get next question
+                    next_question = reply.get("next_question", "Follow-up question")
+                    
+                    # Store in conversation with score
+                    conversation_entry = {
+                        "candidate": candidate_message,
+                        "score": score,
+                        "time_taken": time_taken,
+                        "evaluation": evaluation_text,
+                        "next_question": next_question,
+                        **reply
+                    }
+                    session["conversation"].append(conversation_entry)
+                    print(f"Added code submission to conversation: Q#{len(session['conversation'])}")
+                    
+                    # Track score
+                    session["individual_scores"].append(score)
+                    print(f"Individual scores so far: {session['individual_scores']}")
+                    
+                    # Store in database
+                    print(f"\n💾 DATABASE STORAGE ATTEMPT (code)")
+                    print(f"session_id: {session.get('session_id')}")
+                    print(f"interview_id: {session.get('interview_id')}")
+                    
+                    if session.get("session_id") and session.get("interview_id"):
+                        question_index = len(session["conversation"])
+                        
+                        # Get the previous question (what was asked)
+                        if len(session["conversation"]) > 1:
+                            prev_entry = session["conversation"][-2]
+                            question_text = prev_entry.get("next_question", "Code challenge")
+                        else:
+                            question_text = "Code challenge"
+                        
+                        # Derive difficulty - code submissions are typically more advanced
+                        code_length = len(code.split('\n'))
+                        if score >= 80 and code_length > 10:
+                            difficulty = "advanced"
+                        elif score >= 60:
+                            difficulty = "intermediate"
+                        else:
+                            difficulty = "conversational"
+                        
+                        question_data = {
+                            "question": question_text,
+                            "user_response": candidate_message,
+                            "score": score,
+                            "feedback": evaluation_text,
+                            "time_taken": time_taken,
+                            "hints_used": 0,
+                            "difficulty": difficulty
+                        }
+                        
+                        print(f"Code question #{question_index} data:")
+                        print(f"  - Question: '{question_text[:80]}...'")
+                        print(f"  - Code lines: {code_length}")
+                        print(f"  - Score: {score}")
+                        print(f"  - Difficulty: {difficulty}")
+                        print(f"  - Time: {time_taken}s")
+                        
+                        try:
+                            db_result = await db.store_question_response(
+                                session["session_id"],
+                                question_index,
+                                question_data
+                            )
+                            if db_result:
+                                print(f"✅ STORED code submission to database: Q#{question_index}")
+                            else:
+                                print(f"❌ Database store returned False for code Q#{question_index}")
+                        except Exception as e:
+                            print(f"❌ Failed to store code submission: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print("❌ SKIPPING database storage - missing session_id or interview_id")
+                        print(f"  session_id: {session.get('session_id')}")
+                        print(f"  interview_id: {session.get('interview_id')}")
+                    
+                    # Reset time
+                    session["last_question_time"] = current_time
+                    print(f"Updated last_question_time for next question\n")
+                else:
+                    # Technical interviews
+                    session["conversation"].append({
+                        "candidate": candidate_message,
+                        **reply
+                    })
+                
                 await ws.send_text(json.dumps({"type": "assessment", **reply}))
 
             elif mtype == "record_audio":
@@ -1343,12 +1814,84 @@ Resume:
                     
                     print("🤖 Getting AI response...")
                     reply = interviewer_reply(candidate, session["conversation"])
+                    
+                    # Extract score from evaluation
+                    evaluation_text = reply.get("evaluation", "")
+                    print(f"📊 DEBUG record_audio - Mode: {session.get('mode')}")
+                    print(f"📊 DEBUG record_audio - Full reply: {reply}")
+                    print(f"📊 DEBUG record_audio - Evaluation: {evaluation_text[:150] if evaluation_text else 'EMPTY'}...")
+                    score = extract_score_from_evaluation(evaluation_text)
+                    print(f"📊 DEBUG record_audio - Extracted score: {score}")
+                    
+                    # Ensure score is valid
+                    if score is None or score < 0 or score > 100:
+                        print(f"⚠️ Invalid score {score}, using default 50")
+                        score = 50
+                    
+                    # Calculate time taken for this question
+                    current_time = time.time()
+                    time_taken = int(current_time - session.get("last_question_time", current_time))
+                    
+                    # Store in conversation with score
                     session["conversation"].append({
                         "candidate": candidate,
+                        "score": score,
+                        "time_taken": time_taken,
                         **reply
                     })
                     
-                    print(f"📤 Sending assessment to frontend")
+                    # Track score
+                    session["individual_scores"].append(score)
+                    
+                    # Store in database (question_responses table)
+                    print(f"📊 DEBUG - session_id: {session.get('session_id')}, interview_id: {session.get('interview_id')}")
+                    if session.get("session_id") and session.get("interview_id"):
+                        question_index = len(session["conversation"])
+                        question_text = reply.get("next_question", "Follow-up question")
+                        print(f"📝 Preparing to store Q&A #{question_index}")
+                        
+                        # Derive difficulty from score and response depth
+                        # High scores (80+) with good depth = advanced
+                        # Medium scores (60-79) or moderate depth = intermediate
+                        # Lower scores (<60) or brief responses = conversational
+                        response_length = len(candidate.split())
+                        if score >= 80 and response_length > 50:
+                            difficulty = "advanced"
+                        elif score >= 60 and response_length > 30:
+                            difficulty = "intermediate"
+                        else:
+                            difficulty = "conversational"
+                        
+                        question_data = {
+                            "question": question_text,
+                            "user_response": candidate,
+                            "score": score,
+                            "feedback": evaluation_text,
+                            "time_taken": time_taken,
+                            "hints_used": 0,  # Resume interviews don't use hints
+                            "difficulty": difficulty
+                        }
+                        
+                        print(f"📊 Question data to store: {question_data}")
+                        try:
+                            result = await db.store_question_response(
+                                session["session_id"],
+                                question_index,
+                                question_data
+                            )
+                            print(f"✅ Database storage result: {result}")
+                            print(f"✅ Stored resume Q&A #{question_index} (score: {score}, difficulty: {difficulty})")
+                        except Exception as e:
+                            print(f"⚠️ Failed to store resume Q&A: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print(f"⚠️ Cannot store Q&A - Missing session_id or interview_id")
+                    
+                    # Reset time for next question
+                    session["last_question_time"] = current_time
+                    
+                    print(f"📤 Sending assessment to frontend (score: {score})")
                     await ws.send_text(json.dumps({"type": "assessment", **reply}))
                     
                 except Exception as e:
@@ -1364,16 +1907,22 @@ Resume:
                 # Set flag to stop any ongoing recording
                 session["ended"] = True
                 
+                print(f"\n🏁 END INTERVIEW - Starting comprehensive save")
+                print(f"Session ID: {session.get('session_id')}")
+                print(f"Interview ID: {session.get('interview_id')}")
+                print(f"Mode: {session.get('mode')}")
+                print(f"Conversation length: {len(session.get('conversation', []))}")
+                print(f"Individual scores: {session.get('individual_scores', [])}")
+                
                 # Save interview results before ending
                 try:
                     if session and "conversation" in session:
                         interview_id = str(uuid.uuid4())
-                        import datetime
                         end_time = time.time()
                         
                         interview_data = {
                             "interview_id": interview_id,
-                            "timestamp": datetime.datetime.now().isoformat(),
+                            "timestamp": datetime.now().isoformat(),
                             "interview_type": session.get("mode", "unknown"),
                             "conversation": session["conversation"],
                             "resume_id": session.get("resume_id"),
@@ -1383,33 +1932,73 @@ Resume:
                         
                         # Save to database if session was tracked
                         if session.get("session_id") and session.get("interview_id"):
-                            print(f"📊 Saving {session.get('mode', 'unknown')} interview to database...")
+                            print(f"\n💾 SAVING {session.get('mode', 'unknown').upper()} INTERVIEW TO DATABASE...")
                             
                             # Calculate duration
                             duration = int(end_time - session.get("start_time", end_time))
+                            print(f"Duration: {duration}s ({duration//60}m {duration%60}s)")
+                            
+                            # Calculate dynamic scores from tracked data
+                            individual_scores = session.get("individual_scores", [])
+                            conversation_count = len(session["conversation"])
+                            
+                            print(f"\n📊 FINAL METRICS CALCULATION:")
+                            print(f"  Total Q&A exchanges: {conversation_count}")
+                            print(f"  Individual scores collected: {len(individual_scores)}")
+                            print(f"  Scores: {individual_scores}")
+                            
+                            if individual_scores:
+                                average_score = round(sum(individual_scores) / len(individual_scores))
+                                print(f"  Average score: {sum(individual_scores)}/{len(individual_scores)} = {average_score}")
+                            else:
+                                average_score = 0
+                                print(f"  ⚠️ No scores collected - setting average to 0")
+                            
+                            # Validate: ensure individual_scores length matches completed_questions
+                            completed_questions = conversation_count
+                            if len(individual_scores) != completed_questions:
+                                print(f"⚠️ MISMATCH: {len(individual_scores)} scores vs {completed_questions} questions")
+                                # This is OK if some questions didn't have scores - don't pad
+                            
+                            print(f"\n📋 FINAL RESUME INTERVIEW METRICS:")
+                            print(f"   ✓ Completed questions: {completed_questions}")
+                            print(f"   ✓ Current question index: {completed_questions}")
+                            print(f"   ✓ Individual scores: {individual_scores}")
+                            print(f"   ✓ Average score: {average_score}/100")
+                            print(f"   ✓ Duration: {duration}s")
                             
                             # Complete the interview in database
                             results_data = {
                                 "end_time": end_time,
                                 "duration": duration,
                                 "total_time": duration,
-                                "completed_questions": len(session["conversation"]),
-                                "average_score": 0,  # No scoring for conversational interviews
-                                "individual_scores": [],
+                                "completed_questions": completed_questions,
+                                "current_question_index": completed_questions,  # For resume, this equals completed_questions
+                                "average_score": average_score,  # ✅ Dynamically computed from individual_scores
+                                "individual_scores": individual_scores,  # ✅ Dynamically collected during interview
                                 "final_results": interview_data,
-                                "completion_method": "manual"
+                                "completion_method": "manually_ended"
                             }
+                            
+                            print(f"\n📤 Sending to database...")
+                            print(f"Results data keys: {list(results_data.keys())}")
                             
                             db_success = await db.complete_interview(session["session_id"], results_data)
                             if db_success:
-                                print(f"✅ Resume interview saved to database: {session['session_id']}")
+                                print(f"✅ INTERVIEW SAVED TO DATABASE: session_id={session['session_id']}")
+                                print(f"   Database interview_id: {session['interview_id']}")
+                                
                                 # Invalidate cache so Past Interviews shows updated data immediately
                                 from database import _interviews_cache
                                 _interviews_cache["data"] = None
                                 _interviews_cache["timestamp"] = 0
                                 print("🔄 Cache invalidated - Past Interviews will show fresh data")
                             else:
-                                print(f"❌ Failed to save resume interview to database")
+                                print(f"❌ DATABASE SAVE FAILED - db.complete_interview returned False")
+                        else:
+                            print(f"\n❌ CANNOT SAVE TO DATABASE - Missing identifiers:")
+                            print(f"   session_id: {session.get('session_id')}")
+                            print(f"   interview_id: {session.get('interview_id')}")
                         
                         # Also save to file for backup
                         filename = f"interview_results_{interview_id}.json"
@@ -1419,6 +2008,7 @@ Resume:
                         
                         with open(filepath, 'w', encoding='utf-8') as f:
                             json.dump(interview_data, f, indent=2, ensure_ascii=False)
+                        print(f"💾 Backup saved to file: {filepath}")
                         
                         await ws.send_text(json.dumps({
                             "type": "ended",
@@ -1426,9 +2016,10 @@ Resume:
                             "download_url": f"/download_results/{interview_id}"
                         }))
                     else:
+                        print("⚠️ No conversation data to save")
                         await ws.send_text(json.dumps({"type": "ended"}))
                 except Exception as e:
-                    print(f"❌ Error saving interview results: {e}")
+                    print(f"❌ ERROR SAVING INTERVIEW: {e}")
                     import traceback
                     traceback.print_exc()
                     await ws.send_text(json.dumps({
@@ -1478,7 +2069,64 @@ Resume:
 # -----------------------------
 @app.websocket("/ws/technical")
 async def technical_ws_endpoint(ws: WebSocket):
+    print("🔌 Technical WebSocket connection attempt")
     await ws.accept()
+    print("✅ Technical WebSocket accepted")
+    
+    # Extract and verify authentication token from query params
+    user_id = None
+    try:
+        # Get token from query parameter
+        query_params = dict(ws.query_params)
+        token = query_params.get("token")
+        print(f"🔑 Token present: {bool(token)}")
+        
+        if not token:
+            await ws.send_text(json.dumps({
+                "type": "error",
+                "error": "Authentication required. Please login first."
+            }))
+            await ws.close(code=1008, reason="Authentication required")
+            return
+        
+        # Verify JWT token
+        if SUPABASE_JWT_SECRET and SUPABASE_JWT_SECRET != "your-jwt-secret-from-supabase-dashboard-settings-api":
+            print("🔐 Verifying JWT token with secret...")
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+        else:
+            # Fallback: decode without verification (development only)
+            print("⚠️ WARNING: JWT verification disabled - using fallback mode (technical)")
+            payload = jwt.decode(token, options={"verify_signature": False})
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise Exception("Invalid token: missing user ID")
+        
+        print(f"✅ Technical WebSocket authenticated for user: {user_id}")
+        
+    except PyJWTError as e:
+        print(f"❌ JWT Error in technical WebSocket: {e}")
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "error": f"Invalid authentication token: {str(e)}"
+        }))
+        await ws.close(code=1008, reason="Invalid token")
+        return
+    except Exception as e:
+        print(f"❌ Authentication error in technical WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "error": f"Authentication failed: {str(e)}"
+        }))
+        await ws.close(code=1008, reason="Authentication failed")
+        return
     
     session_id = None
     session = None
@@ -1498,19 +2146,33 @@ async def technical_ws_endpoint(ws: WebSocket):
 
             if mtype == "init_technical":
                 topics = msg.get("topics", [])
+                print(f"📝 Received init_technical with topics: {topics}")
                 if not topics:
                     await ws.send_text(json.dumps({
                         "type": "error", "error": "No topics selected"
                     }))
                     continue
                 
-                # Create technical interview session
-                session = TechnicalSession(topics)
+                # Create technical interview session with user_id
+                print(f"🏗️ Creating TechnicalSession for user {user_id}")
+                session = TechnicalSession(topics, user_id)
                 session_id = session.session_id
                 technical_sessions[session_id] = session
+                print(f"✅ TechnicalSession created: {session_id}")
+                
+                # Send immediate acknowledgment
+                await ws.send_text(json.dumps({
+                    "type": "initializing",
+                    "message": "Preparing your interview questions..."
+                }))
+                
+                # Generate questions asynchronously
+                print(f"📝 Starting async question generation...")
+                await session.generate_questions_async()
                 
                 # Send first question
                 current_question = session.get_current_question()
+                print(f"📤 Sending first question: {current_question['question'][:50] if current_question else 'None'}...")
                 if current_question:
                     await ws.send_text(json.dumps({
                         "type": "question",
@@ -1868,6 +2530,42 @@ async def llm_evaluate_code_submission(session: TechnicalSession, code: str, lan
     print(f"🔍 Starting evaluation for question {session.current_question_index + 1}")
     print(f"🔍 Code length: {len(code)}, Language: {language}, Time: {time_spent/1000:.1f}s, Hints: {hints_used}")
     
+    # CRITICAL: Detect if code is just boilerplate/template (unchanged)
+    code_stripped = code.strip()
+    is_boilerplate = False
+    
+    # Check for common boilerplate patterns
+    boilerplate_indicators = [
+        "# Write your solution here",
+        "// Write your solution here",
+        "Your code here",
+        "pass\n\nif __name__",  # Python with just pass
+        "function solution() {\n    // Your code here\n}",  # JS unchanged
+        "public void solution() {\n        \n    }",  # Java empty
+        "void solution() {\n        \n    }"  # C++ empty
+    ]
+    
+    # Check if code is essentially unchanged from template
+    for indicator in boilerplate_indicators:
+        if indicator in code:
+            is_boilerplate = True
+            print(f"⚠️ BOILERPLATE DETECTED: Found '{indicator[:30]}...'")
+            break
+    
+    # Also check if code is too short (less than 5 meaningful lines)
+    meaningful_lines = [line for line in code_stripped.split('\n') 
+                       if line.strip() and not line.strip().startswith('#') 
+                       and not line.strip().startswith('//') 
+                       and line.strip() != 'pass']
+    
+    if len(meaningful_lines) < 5:
+        is_boilerplate = True
+        print(f"⚠️ BOILERPLATE DETECTED: Only {len(meaningful_lines)} meaningful lines")
+    
+    if is_boilerplate:
+        print("❌ Code is unchanged boilerplate - returning score 0")
+        return 0
+    
     if not client:
         print("❌ Groq client not available, using fallback evaluation")
         return evaluate_code_submission_fallback(session, code, language, time_spent, hints_used)
@@ -1883,25 +2581,29 @@ Question: {current_question['question']}
 Candidate's Code ({language}):
 {code}
 
-Context:
-- Time: {time_spent/1000:.1f}s, Hints: {hints_used}, Approach discussed: {session.approach_discussed}
+Interview Context:
+- Time spent: {time_spent/1000:.1f}s
+- Hints used: {hints_used}
+- Discussion turns: {session.discussion_turns}
+- Clarification questions: {session.clarification_questions}
+- Approach discussed: {session.approach_discussed}
 
-Scoring (0-100 total):
-- Correctness: 0-25 points
-- Approach discussion: -10 if none, +5 if good
-- Time penalty: -1 per minute over 10min
-- Hint penalty: -5 per hint
-- Code quality: 0-15 points
-- Understanding: 0-10 points
+Evaluation Criteria:
+You must classify the technical correctness into ONE of these three levels:
+
+1. "fully_correct": Logic is sound, handles edge cases, implementation is correct
+2. "mostly_correct": Core logic correct but has minor bugs, syntax issues, or missed 1-2 edge cases
+3. "incorrect": Wrong approach, fundamentally broken logic, or doesn't solve the problem
+
+DO NOT assign a numerical score. Only evaluate correctness level and provide feedback.
 
 Respond exactly like this:
 {{
-    "score": 75,
-    "feedback": "Brief overall assessment",
-    "correctness": "Brief correctness assessment",
-    "approach_quality": "Brief approach assessment", 
-    "code_quality": "Brief code quality assessment",
-    "areas_for_improvement": ["issue1", "issue2"]
+    "technical_correctness": "fully_correct",
+    "feedback": "Brief overall assessment of the solution",
+    "correctness_reason": "Why this correctness level was assigned",
+    "edge_cases_handled": ["edge case 1", "edge case 2"],
+    "areas_for_improvement": ["improvement 1", "improvement 2"]
 }}
 """
 
@@ -1961,14 +2663,57 @@ Respond exactly like this:
                     return evaluate_code_submission_fallback(session, code, language, time_spent, hints_used)
         
         if evaluation:
-            score = evaluation.get("score", 70)
-            if not isinstance(score, (int, float)) or score < 0 or score > 100:
-                print(f"Invalid score from LLM: {score}")
-                return evaluate_code_submission_fallback(session, code, language, time_spent, hints_used)
+            # Extract correctness level from LLM
+            technical_correctness = evaluation.get("technical_correctness", "incorrect")
+            
+            # Determine base score from correctness level
+            base_score_map = {
+                "fully_correct": 100,
+                "mostly_correct": 80,
+                "incorrect": 0  # Changed from 40 to 0 - wrong code gets 0
+            }
+            base_score = base_score_map.get(technical_correctness, 0)
+            
+            print(f"🎯 Technical Correctness: {technical_correctness} → Base Score: {base_score}")
+            
+            # Apply deterministic deductions
+            deductions = 0
+            
+            # Hints penalty: -10 per hint
+            hints_penalty = hints_used * 10
+            deductions += hints_penalty
+            if hints_penalty > 0:
+                print(f"  ⚠️ Hints penalty: -{hints_penalty} ({hints_used} hints × 10)")
+            
+            # Discussion turns penalty: -5 per turn (debugging/edge case prompts)
+            # Only penalize if solution is not fully correct (indicates struggling)
+            if technical_correctness != "fully_correct" and session.discussion_turns > 0:
+                discussion_penalty = session.discussion_turns * 5
+                deductions += discussion_penalty
+                print(f"  ⚠️ Discussion penalty: -{discussion_penalty} ({session.discussion_turns} turns × 5)")
+            
+            # Clarification penalty: -5 per clarification (only if excessive)
+            # Some clarifications are good, but >2 suggests confusion
+            if session.clarification_questions > 2:
+                clarification_penalty = (session.clarification_questions - 2) * 5
+                deductions += clarification_penalty
+                print(f"  ⚠️ Clarification penalty: -{clarification_penalty} ({session.clarification_questions - 2} excessive × 5)")
+            
+            # Calculate final score
+            final_score = max(0, min(100, base_score - deductions))
+            
+            print(f"📊 Score Calculation:")
+            print(f"   Base ({technical_correctness}): {base_score}")
+            print(f"   Total Deductions: -{deductions}")
+            print(f"   Final Score: {final_score}/100")
             
             # Store detailed evaluation in session for results
+            evaluation["final_score"] = final_score
+            evaluation["base_score"] = base_score
+            evaluation["deductions"] = deductions
             session.final_evaluation = evaluation
-            return int(score)
+            
+            return int(final_score)
             
     except Exception as e:
         print(f"Error in LLM evaluation: {e}")
@@ -1978,34 +2723,68 @@ Respond exactly like this:
 
 def evaluate_code_submission_fallback(session: TechnicalSession, code: str, language: str, time_spent: int, hints_used: int) -> int:
     """
-    Fallback evaluation method if LLM fails
+    Fallback evaluation method if LLM fails - uses heuristic correctness detection
     """
-    base_score = 70
+    print("⚠️ Using fallback evaluation (LLM unavailable)")
     
-    # Approach discussion bonus/penalty
-    if not session.approach_discussed:
-        base_score -= 15  # Significant penalty for not discussing approach
-    elif len(session.voice_responses) > 0:
-        base_score += 5  # Bonus for good approach discussion
+    # Check for boilerplate first
+    code_stripped = code.strip()
+    boilerplate_indicators = [
+        "# Write your solution here",
+        "// Write your solution here",
+        "Your code here",
+        "pass\n\nif __name__"
+    ]
     
-    # Time penalty (more strict)
-    time_minutes = time_spent / 60000
-    if time_minutes > 10:
-        base_score -= min(15, (time_minutes - 10) * 2)
+    for indicator in boilerplate_indicators:
+        if indicator in code:
+            print(f"❌ Boilerplate detected in fallback: {indicator[:30]}...")
+            return 0
     
-    # Hint penalty (increased)
-    base_score -= hints_used * 7
+    # Heuristic correctness detection based on code quality
+    code_lower = code.lower()
+    has_function = 'def ' in code or 'function ' in code or 'class ' in code
+    has_logic = any(keyword in code_lower for keyword in ['if', 'else', 'for', 'while', 'return'])
+    has_structure = len(code.strip()) > 50
     
-    # Code quality bonus
-    quality_bonus = 0
-    if len(code.strip()) > 50:
-        quality_bonus += 5
-    if 'def ' in code or 'function ' in code or 'class ' in code:
-        quality_bonus += 8
-    if any(keyword in code.lower() for keyword in ['if', 'else', 'for', 'while']):
-        quality_bonus += 5
-        
-    final_score = max(0, min(100, base_score + quality_bonus))
+    # Estimate correctness level
+    if has_function and has_logic and has_structure:
+        # Assume mostly correct if code looks complete
+        base_score = 80
+        print("  📊 Heuristic: mostly_correct (has function, logic, structure)")
+    elif has_function or (has_logic and has_structure):
+        # Partial implementation
+        base_score = 60
+        print("  📊 Heuristic: partially_correct (incomplete)")
+    else:
+        # Minimal/incorrect code
+        base_score = 40
+        print("  📊 Heuristic: incorrect (insufficient code)")
+    
+    # Apply deterministic deductions (same as LLM path)
+    deductions = 0
+    
+    # Hints penalty: -10 per hint
+    hints_penalty = hints_used * 10
+    deductions += hints_penalty
+    if hints_penalty > 0:
+        print(f"  ⚠️ Hints penalty: -{hints_penalty}")
+    
+    # Discussion penalty: -5 per turn
+    if session.discussion_turns > 0:
+        discussion_penalty = session.discussion_turns * 5
+        deductions += discussion_penalty
+        print(f"  ⚠️ Discussion penalty: -{discussion_penalty}")
+    
+    # Clarification penalty: -5 per excessive clarification (>2)
+    if session.clarification_questions > 2:
+        clarification_penalty = (session.clarification_questions - 2) * 5
+        deductions += clarification_penalty
+        print(f"  ⚠️ Clarification penalty: -{clarification_penalty}")
+    
+    final_score = max(0, min(100, base_score - deductions))
+    print(f"  📊 Fallback Final Score: {final_score}/100")
+    
     return final_score
 
 

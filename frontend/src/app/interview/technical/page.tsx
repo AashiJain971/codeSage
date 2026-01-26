@@ -2,6 +2,9 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from '../../../components/Navbar';
+import ProtectedRoute from '../../../components/ProtectedRoute';
+import { useAuth } from '@/contexts/AuthContext';
+import { getAuthenticatedWsUrl, getApiBase } from '@/lib/api';
 import {
   Code2,
   Mic,
@@ -76,29 +79,9 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-// Resolve API/WS endpoints even if env vars are missing at build time
-const getApiBase = () => {
-  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL !== "undefined") {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  return "https://codesage-backend-1k6a.onrender.com";
-};
-
-const getWsBase = () => {
-  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL !== "undefined") {
-    return process.env.NEXT_PUBLIC_WS_URL;
-  }
-  if (typeof window !== "undefined") {
-    return window.location.origin.replace(/^http/, "ws");
-  }
-  return "wss://codesage-backend-1k6a.onrender.com";
-};
-
-export default function TechnicalInterview() {
+function TechnicalInterview() {
   const router = useRouter();
+  const { getToken } = useAuth();
 
   const handleTakeInterview = () => {
     router.push("/interview");
@@ -207,6 +190,12 @@ export default function TechnicalInterview() {
     initializeCamera();
     return () => stopCamera();
   }, []);
+
+  // Debug: Track interviewStarted state changes
+  useEffect(() => {
+    console.log('🔔 interviewStarted state changed to:', interviewStarted);
+    console.log('🔔 Current render state - isConnected:', isConnected, 'isConnecting:', isConnecting);
+  }, [interviewStarted, isConnected, isConnecting]);
 
   // Auto hint timer - gives hint every 60 seconds for better user experience
   useEffect(() => {
@@ -556,21 +545,47 @@ export default function TechnicalInterview() {
   };
 
   const connectWebSocket = async (topics: string[]) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    console.log('🔌 connectWebSocket called with topics:', topics);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log('⚠️ WebSocket already open');
+      return;
+    }
 
     setIsConnecting(true);
     addChatMessage("system", "Initializing AI Interview System...");
 
     try {
-      const WS_BASE = getWsBase();
-      const ws = new WebSocket(`${WS_BASE}/ws/technical`);
+      // Get authentication token
+      console.log('🔑 Getting authentication token...');
+      const token = await getToken();
+      if (!token) {
+        console.error('❌ No authentication token available');
+        addChatMessage("system", "Authentication failed. Please login again.");
+        setIsConnecting(false);
+        return;
+      }
+      console.log('✅ Token obtained, length:', token.length);
+      
+      const wsUrl = getAuthenticatedWsUrl(token, '/ws/technical');
+      console.log('🌐 Connecting to WebSocket:', wsUrl);
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        console.log('✅ WebSocket connection opened successfully!');
+        console.log('📝 BEFORE setState - interviewStarted:', interviewStarted);
         addChatMessage("system", "Connected to AI Interviewer");
+        console.log('📝 Setting interview states: connected=true, started=true');
         setIsConnected(true);
         setIsConnecting(false);
         setInterviewStarted(true);
         setQuestionStartTime(Date.now());
+        console.log('✅ Interview started state set to true');
+        console.log('📝 AFTER setState call (async update pending)');
+        
+        // Verify state update in next tick
+        setTimeout(() => {
+          console.log('🔍 Checking state after 100ms - interviewStarted should be true');
+        }, 100);
 
         // Initialize speech synthesis on connection (user has already interacted)
         initializeSpeech();
@@ -581,37 +596,54 @@ export default function TechnicalInterview() {
         // Send greeting message from AI interviewer
         const greetingMessage = `Hello! I'm your AI Technical Interviewer. We'll have 4 questions in total, focusing on the topics you selected: ${selectedTopics.join(
           ", "
-        )}. Each question will be of increasing difficulty: Easy, Medium, Hard. Let's begin!`;
+        )}. Each question will be of increasing difficulty. Let's begin with question 1!`;
         addChatMessage("ai", greetingMessage);
         speakText(greetingMessage); // Speak the introduction
 
         // Initialize technical interview
-        ws.send(
-          JSON.stringify({
-            type: "init_technical",
-            topics: selectedTopics,
-          })
-        );
+        console.log('📤 Sending init_technical message with topics:', selectedTopics);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "init_technical",
+              topics: selectedTopics,
+            })
+          );
+          console.log('✅ init_technical message sent successfully');
+        } catch (error) {
+          console.error('❌ Error sending init_technical:', error);
+        }
       };
 
       ws.onmessage = (event) => {
-        const data: WebSocketMessage = JSON.parse(event.data);
-        handleWebSocketMessage(data);
+        console.log('📥 WebSocket message received:', event.data);
+        try {
+          const data: WebSocketMessage = JSON.parse(event.data);
+          console.log('📦 Parsed message type:', data.type);
+          handleWebSocketMessage(data);
+        } catch (error) {
+          console.error('❌ Error parsing WebSocket message:', error);
+        }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log("🔌 Technical WebSocket connection closed", event.code, event.reason);
         addChatMessage("system", "Connection terminated");
         setIsConnected(false);
         setInterviewStarted(false);
+        setIsConnecting(false);
       };
 
       ws.onerror = (error) => {
-        addChatMessage("system", "System error: " + error);
+        console.error("❌ Technical WebSocket error:", error);
+        console.error("❌ WebSocket state:", ws.readyState);
+        addChatMessage("system", "Connection error. Please check your internet connection and try again.");
         setIsConnecting(false);
       };
 
       wsRef.current = ws;
     } catch (error) {
+      console.error("❌ Failed to connect to technical interview:", error);
       addChatMessage("system", "Failed to initialize: " + error);
       setIsConnecting(false);
     }
@@ -619,6 +651,11 @@ export default function TechnicalInterview() {
 
   const handleWebSocketMessage = (data: WebSocketMessage) => {
     switch (data.type) {
+      case "initializing":
+        console.log('⚙️ Interview initializing:', data.message);
+        addChatMessage("system", data.message || "Preparing interview...");
+        break;
+
       case "stop_speech":
         // Immediately stop any ongoing speech synthesis
         if ("speechSynthesis" in window) {
@@ -628,12 +665,16 @@ export default function TechnicalInterview() {
         break;
 
       case "question":
+        console.log('❓ Received question:', data.next_question?.substring(0, 50) + '...');
+        console.log('📊 Question difficulty:', data.difficulty);
+        console.log('📚 Question topics:', data.topics);
         setCurrentQuestion(data.next_question || "");
         setQuestionStartTime(Date.now());
         setHintsUsed(0);
         setApproachDiscussed(false);
         setCode(getLanguageTemplate(language));
         addChatMessage("ai", data.next_question || "");
+        console.log('✅ Question state updated successfully');
         // Don't speak questions - user can read them
         break;
 
@@ -722,7 +763,8 @@ export default function TechnicalInterview() {
             data.remaining_questions || "unknown"
           );
 
-          const nextQuestionNumber = completedQuestionNumber + 1;
+          // Use question_number from backend if available, otherwise calculate
+          const nextQuestionNumber = data.question_number || (completedQuestionNumber + 1);
           setTimeout(() => {
             // Clear any existing hint timer
             if (hintTimer) clearTimeout(hintTimer);
@@ -736,8 +778,9 @@ export default function TechnicalInterview() {
               "ai",
               `Question ${nextQuestionNumber}: ${data.next_question || ""}`
             );
+            // Don't say question number - just say "here's the next question"
             speakText(
-              `Here's the next question, question ${nextQuestionNumber}.`
+              "Here's the next question."
             );
           }, 2000);
         } else {
@@ -945,6 +988,7 @@ export default function TechnicalInterview() {
   }
 
   if (!interviewStarted) {
+    console.log('🎯 Rendering topic selector (interviewStarted=false)');
     return (
       <div className="min-h-screen bg-gray-50 overflow-hidden">
         <motion.div
@@ -1072,6 +1116,7 @@ export default function TechnicalInterview() {
 
   // Show loading screen when ending interview
   if (isEndingInterview) {
+    console.log('🎯 Rendering ending screen (isEndingInterview=true)');
     return (
       <div className="min-h-screen bg-gray-50 overflow-hidden">
         <div className="flex items-center justify-center min-h-screen pt-20">
@@ -1116,6 +1161,7 @@ export default function TechnicalInterview() {
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-hidden">
+      {console.log('🎯 Rendering main interview interface (interviewStarted=true)')}
       {/* Main Interview Interface */}
       <div className="h-screen flex flex-col">
         {/* Header */}
@@ -1643,5 +1689,14 @@ export default function TechnicalInterview() {
         </motion.div>
       )}
     </div>
+  );
+}
+
+// Wrap with Protected Route
+export default function TechnicalInterviewWrapper() {
+  return (
+    <ProtectedRoute>
+      <TechnicalInterview />
+    </ProtectedRoute>
   );
 }

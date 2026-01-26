@@ -16,7 +16,7 @@ const Features = () => {
         </svg>
       ),
       title: 'Technical Interviews',
-      description: 'Practice coding and technical interviews with AI-powered questions. Features real-time voice interaction, code editor, and instant feedback on your solutions.'
+      description: 'AI-led technical interviews designed to evaluate problem-solving, reasoning, and explanation depth. Includes real-time voice interaction, coding environment, and structured evaluation.'
     },
     {
       id: 2,
@@ -30,7 +30,7 @@ const Features = () => {
         </svg>
       ),
       title: 'Resume-Based Interviews',
-      description: 'Upload your resume and get personalized interview questions based on your experience, projects, and skills. Perfect for behavioral interview practice.'
+      description: 'Upload your resume and get personalized interview questions based on your experience, projects, and skills. Designed to assess real-world experience, decision-making, and role readiness.'
     },
     {
       id: 3,
@@ -41,7 +41,7 @@ const Features = () => {
         </svg>
       ),
       title: 'Past Interview Analytics',
-      description: 'Review all your past interviews with detailed performance metrics, and visual analytics. Track your progress over time and identify improvement areas.'
+      description: 'Review all your past interviews with detailed performance metrics, and visual analytics. View structured interview summaries, skill-wise evaluations, and AI recommendations generated from past interviews.'
     },
     {
       id: 4,
@@ -52,7 +52,7 @@ const Features = () => {
         </svg>
       ),
       title: 'Real-Time Voice Interaction',
-      description: 'Experience natural interview conversations with speech-to-text transcription, AI-powered responses, and seamless voice interaction for realistic practice.'
+      description: 'Experience natural interview conversations with speech-to-text transcription, AI-powered responses, and seamless voice interaction for natural, explanation-driven interview conversations.'
     }
   ];
 

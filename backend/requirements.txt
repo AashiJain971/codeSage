@@ -4,6 +4,9 @@ uvicorn[standard]==0.27.0
 websockets>=13.0  # Updated for supabase compatibility
 python-multipart==0.0.9
 
+# Authentication
+PyJWT==2.8.0
+
 # AI/ML
 groq==0.4.1
 

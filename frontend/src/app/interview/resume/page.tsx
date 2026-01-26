@@ -2,28 +2,10 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../../../components/Navbar';
-
-// Resolve API/WS endpoints even if env vars are missing at build time
-const getApiBase = () => {
-  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL !== "undefined") {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  return "https://codesage-backend-1k6a.onrender.com";
-};
-
-const getWsBase = () => {
-  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL !== "undefined") {
-    return process.env.NEXT_PUBLIC_WS_URL;
-  }
-  if (typeof window !== "undefined") {
-    return window.location.origin.replace(/^http/, "ws");
-  }
-  return "wss://codesage-backend-1k6a.onrender.com";
-};
-import { FileText, Upload, Mic, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send, X, MessageSquare } from 'lucide-react';
+import ProtectedRoute from '../../../components/ProtectedRoute';
+import { useAuth } from '@/contexts/AuthContext';
+import { getAuthenticatedWsUrl, getApiBase } from '@/lib/api';
+import { FileText, Upload, Mic, MicOff, CheckCircle, Loader2, Play, ArrowLeft, Camera, CameraOff, Code2, Send, X, MessageSquare } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -42,8 +24,9 @@ interface WebSocketMessage {
   download_url?: string;
 }
 
-export default function ResumeInterviewPage() {
+function ResumeInterviewPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [phase, setPhase] = useState('');
@@ -87,6 +70,10 @@ export default function ResumeInterviewPage() {
   // Typing detection state to prevent voice recording during typing
   const [isTyping, setIsTyping] = useState(false);
   
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingLocked, setIsRecordingLocked] = useState(false); // Prevent concurrent recordings
+  
   // WebSocket reconnection state
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const maxReconnectAttempts = 3;
@@ -95,22 +82,11 @@ export default function ResumeInterviewPage() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const cameraRef = useRef<HTMLDivElement>(null);
   const endTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const HTTP_BASE = getApiBase();
-  const WS_URL = `${getWsBase()}/ws`;
-
-  // Debug: Log env vars on mount
-  useEffect(() => {
-    console.log('🔧 ENV DEBUG:', {
-      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-      NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
-      computedWS_URL: WS_URL
-    });
-  }, []);
 
   const addLog = (message: string) => {
     setLogs(prev => [...prev, message]);
@@ -208,6 +184,27 @@ export default function ResumeInterviewPage() {
       setChatPanelWidth(newWidth);
     }
   };
+
+  // Initialize speech synthesis voices
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      // Load voices
+      const loadVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        console.log('🎤 Speech voices loaded:', voices.length);
+      };
+
+      // Load voices immediately
+      loadVoices();
+
+      // Also listen for voiceschanged event (needed for some browsers)
+      window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+
+      return () => {
+        window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+      };
+    }
+  }, []);
 
   const handleMouseUp = () => {
     setIsResizing(false);
@@ -326,30 +323,77 @@ export default function ResumeInterviewPage() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const startServerVAD = () => {
-    // ONLY block if user is actively typing (removed textarea content check)
+  const startServerVAD = async () => {
+    // Toggle behavior: if recording, stop it; if not recording, start it
+    if (isRecording || isRecordingLocked) {
+      console.log('⏹️ Stopping recording manually...');
+      stopRecording();
+      return;
+    }
+    
+    // Lock to prevent concurrent calls
+    if (isRecordingLocked) {
+      console.log('🔒 Recording already in progress, ignoring');
+      return;
+    }
+    
+    // ONLY block if user is actively typing
     if (isTyping || blockVAD) {
       console.log('⛔ VAD BLOCKED - User is actively typing');
       return;
     }
 
-    // ECHO PREVENTION
+    // ECHO PREVENTION - Wait 5 seconds after AI speech to prevent echo
     const timeSinceLastSpeech = Date.now() - lastSpeechEndTime;
-    if (lastSpeechEndTime > 0 && timeSinceLastSpeech < 2000) {
-      console.log(`⏸️ Waiting for speech cooldown... (${Math.round((2000 - timeSinceLastSpeech) / 1000)}s remaining)`);
-      setTimeout(startServerVAD, 2000 - timeSinceLastSpeech);
+    if (lastSpeechEndTime > 0 && timeSinceLastSpeech < 5000) {
+      console.log(`⏸️ Waiting for speech cooldown to prevent echo... (${Math.round((5000 - timeSinceLastSpeech) / 1000)}s remaining)`);
+      addLog(`⏳ Please wait ${Math.ceil((5000 - timeSinceLastSpeech) / 1000)}s for AI speech to clear...`);
       return;
     }
 
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ WebSocket not connected, cannot start recording');
+      addLog('⚠️ Connection lost - please wait');
+      return;
+    }
+    
+    if (!cameraStream) {
+      console.error('❌ Camera not enabled');
+      addLog('⚠️ Please enable camera/microphone first');
+      return;
+    }
 
+    // CRITICAL: Cancel any speech synthesis immediately to prevent echo
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      console.log('🔇 Cancelled speech synthesis to prevent echo');
+    }
+    setIsSpeaking(false);
+    
+    setIsRecordingLocked(true);
+    setIsRecording(true);
+    setPhaseStatus('Listening... Click again to stop');
+    
     console.log('🎤 Starting client recording - speak now');
-    setPhaseStatus('Listening...');
-    recordAndSendAnswer();
+    await recordAndSendAnswer();
+  };
+  
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        console.log('⏹️ Manually stopping MediaRecorder');
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping recorder:', e);
+        setIsRecording(false);
+        setIsRecordingLocked(false);
+      }
+    }
   };
 
   // Record mic locally and send transcript to backend
   const recordAndSendAnswer = async () => {
+    const HTTP_BASE = getApiBase();
     console.log('🎤 Starting audio recording and transcription process...');
     console.log('🌐 API Base URL:', HTTP_BASE);
     console.log('🌐 Transcribe endpoint:', `${HTTP_BASE}/transcribe_audio`);
@@ -365,17 +409,75 @@ export default function ResumeInterviewPage() {
     addLog('🎤 Recording your response...');
     
     try {
-      // Ensure we have an audio stream
-      let stream = cameraStream;
-      if (!stream) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          },
-          video: false
-        });
+      // Stop any existing recorder first
+      if (mediaRecorderRef.current) {
+        const state = mediaRecorderRef.current.state;
+        console.log('⚠️ Previous recorder exists with state:', state);
+        if (state !== 'inactive') {
+          try {
+            mediaRecorderRef.current.stop();
+            console.log('✅ Stopped previous recorder');
+          } catch (e) {
+            console.warn('Error stopping previous recorder:', e);
+          }
+        }
+        mediaRecorderRef.current = null;
+        // Wait a bit for cleanup
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // CRITICAL: Must have camera stream with audio for recording
+      if (!cameraStream) {
+        console.error('❌ Camera stream not available - please enable camera first');
+        addLog('⚠️ Please enable camera/microphone first');
+        setPhaseStatus('');
+        setIsRecording(false);
+        return;
+      }
+      
+      console.log('📹 Camera stream status:', {
+        id: cameraStream.id,
+        active: cameraStream.active,
+        audioTracks: cameraStream.getAudioTracks().length,
+        videoTracks: cameraStream.getVideoTracks().length
+      });
+      
+      // Verify stream is active
+      if (!cameraStream.active) {
+        console.error('❌ Camera stream is not active');
+        addLog('⚠️ Camera stream ended - please restart camera');
+        setPhaseStatus('');
+        setIsRecording(false);
+        return;
+      }
+      
+      // Verify stream has active audio tracks
+      const audioTracks = cameraStream.getAudioTracks();
+      console.log('🎤 Audio tracks found:', audioTracks.length);
+      
+      if (audioTracks.length === 0) {
+        console.error('❌ No audio tracks in stream');
+        addLog('⚠️ Microphone not available - please restart camera with microphone');
+        setPhaseStatus('');
+        setIsRecording(false);
+        return;
+      }
+      
+      const audioTrack = audioTracks[0];
+      console.log('🎤 Audio track details:', {
+        id: audioTrack.id,
+        label: audioTrack.label,
+        enabled: audioTrack.enabled,
+        muted: audioTrack.muted,
+        readyState: audioTrack.readyState
+      });
+      
+      if (!audioTrack.enabled || audioTrack.readyState !== 'live') {
+        console.error('❌ Audio track not ready:', { enabled: audioTrack.enabled, readyState: audioTrack.readyState });
+        addLog('⚠️ Microphone not ready - please check permissions');
+        setPhaseStatus('');
+        setIsRecording(false);
+        return;
       }
 
       const chunks: BlobPart[] = [];
@@ -383,36 +485,85 @@ export default function ResumeInterviewPage() {
       const pickSupportedMime = (): string => {
         const candidates = [
           'audio/webm;codecs=opus',
+          'audio/webm',
           'audio/ogg;codecs=opus',
           'audio/mp4',
-          'audio/webm'
+          ''
         ];
         for (const type of candidates) {
-          // @ts-ignore
-          if (typeof MediaRecorder !== 'undefined' && (MediaRecorder as any).isTypeSupported?.(type)) {
-            return type;
+          try {
+            // @ts-ignore
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
+              console.log('✅ Supported mime type found:', type);
+              return type;
+            }
+          } catch (e) {
+            console.warn('Error checking mime type:', type, e);
           }
         }
-        return 'audio/webm';
+        console.log('⚠️ Using default (empty) mime type');
+        return '';
       };
 
-      const mimeType = pickSupportedMime();
-      console.log('🎙️ Using recorder mime type:', mimeType);
-      const recorder = new MediaRecorder(stream, { mimeType });
+      // Create MediaRecorder with simplest possible configuration
+      let recorder: MediaRecorder;
+      try {
+        // Use default browser settings - no custom mime type
+        recorder = new MediaRecorder(cameraStream);
+        console.log('✅ MediaRecorder created with default settings');
+      } catch (error) {
+        console.error('❌ Failed to create MediaRecorder:', error);
+        addLog('⚠️ Recording not supported in your browser');
+        setPhaseStatus('');
+        setIsRecording(false);
+        setIsRecordingLocked(false);
+        return;
+      }
+      
+      mediaRecorderRef.current = recorder;
 
       const stopPromise = new Promise<Blob>((resolve, reject) => {
         recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
+          if (e.data && e.data.size > 0) {
+            console.log('📦 Audio chunk received:', e.data.size, 'bytes');
+            chunks.push(e.data);
+          }
         };
-        recorder.onerror = (e) => reject(e);
-        recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+        
+        recorder.onerror = (e) => {
+          console.error('❌ MediaRecorder error:', e);
+          setIsRecording(false);
+          setIsRecordingLocked(false);
+          setPhaseStatus('');
+          mediaRecorderRef.current = null;
+          reject(new Error('Recording failed'));
+        };
+        
+        recorder.onstop = () => {
+          console.log('⏹️ MediaRecorder stopped, chunks:', chunks.length);
+          mediaRecorderRef.current = null;
+          setIsRecording(false);
+          setIsRecordingLocked(false);
+          setPhaseStatus('Processing...');
+          resolve(new Blob(chunks, { type: 'audio/webm' }));
+        };
       });
 
-      recorder.start();
-      // Record up to 6 seconds; user should speak immediately
-      setTimeout(() => {
-        try { recorder.stop(); } catch {}
-      }, 6000);
+      console.log('▶️ Starting MediaRecorder...');
+      
+      try {
+        recorder.start();
+        console.log('✅ MediaRecorder started successfully, state:', recorder.state);
+        addLog('🎤 Recording... Click microphone again to stop');
+      } catch (startError) {
+        console.error('❌ Failed to start MediaRecorder:', startError);
+        addLog('⚠️ Could not start recording');
+        setPhaseStatus('');
+        setIsRecording(false);
+        setIsRecordingLocked(false);
+        mediaRecorderRef.current = null;
+        return;
+      }
 
       const blob = await stopPromise;
       console.log('🎵 Audio blob created, size:', blob.size, 'bytes, type:', blob.type);
@@ -421,18 +572,18 @@ export default function ResumeInterviewPage() {
         console.error('❌ Audio blob is empty - no audio recorded');
         addLog('⚠️ No audio captured - please check microphone permissions');
         setPhaseStatus('');
+        setIsRecording(false);
+        setIsRecordingLocked(false);
         return;
       }
 
       const form = new FormData();
-      const filename = mimeType.includes('mp4') ? 'answer.m4a' : (mimeType.includes('ogg') ? 'answer.ogg' : 'answer.webm');
-      form.append('file', blob, filename);
+      form.append('file', blob, 'answer.webm');
       
       console.log('📤 Sending audio to transcribe endpoint...');
       console.log('  - Endpoint:', `${HTTP_BASE}/transcribe_audio`);
       console.log('  - Blob size:', blob.size, 'bytes');
-      console.log('  - MIME type:', mimeType);
-      console.log('  - Filename:', filename);
+      console.log('  - Type:', blob.type);
       
       let res;
       try {
@@ -514,6 +665,7 @@ export default function ResumeInterviewPage() {
         addLog(`⚠️ Backend error: ${transcript}`);
         addLog('💡 This might be a Groq API issue or audio processing problem');
         setPhaseStatus('');
+        setIsRecording(false);
         return;
       }
       
@@ -521,6 +673,7 @@ export default function ResumeInterviewPage() {
         console.log('🤫 No transcript returned from API');
         addLog('⚠️ No speech detected - please speak louder and clearer');
         setPhaseStatus('');
+        setIsRecording(false);
         return;
       }
       
@@ -537,12 +690,14 @@ export default function ResumeInterviewPage() {
       }
       
       setPhaseStatus('');
+      setIsRecording(false);
     } catch (e) {
       console.error('❌ Error recording/transcribing:', e);
       const errorMessage = e instanceof Error ? e.message : String(e);
       console.error('📋 Error details:', errorMessage);
       addLog('❌ Recording failed: ' + errorMessage);
       setPhaseStatus('');
+      setIsRecording(false);
     }
   };
 
@@ -572,6 +727,18 @@ export default function ResumeInterviewPage() {
     
     setPhaseStatus('AI is speaking...');
     
+    // Ensure voices are loaded
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      console.warn('⚠️ No voices loaded yet, attempting to load...');
+      window.speechSynthesis.getVoices();
+      // Give it a moment to load
+      setTimeout(() => {
+        const retryVoices = window.speechSynthesis.getVoices();
+        console.log('🔄 Retry voice count:', retryVoices.length);
+      }, 100);
+    }
+    
     try {
       console.log('🎶 Creating speech utterance...');
       const utterance = new SpeechSynthesisUtterance(text);
@@ -599,12 +766,9 @@ export default function ResumeInterviewPage() {
         setIsSpeaking(false);
         setLastSpeechEndTime(Date.now());
         
-        // Start VAD after speech completes
-        console.log('🎯 Scheduling VAD start in 800ms...');
-        setTimeout(() => {
-          console.log('🎯 Starting VAD now');
-          startServerVAD();
-        }, 800);
+        // Don't auto-start VAD - wait for user to click record button
+        setPhaseStatus('Your turn - click the microphone button to respond');
+        console.log('🎯 Waiting for user to click record button');
       };
       
       utterance.onerror = (e) => {
@@ -612,13 +776,11 @@ export default function ResumeInterviewPage() {
         console.error('  - Error type:', e.error);
         console.error('  - Character index:', e.charIndex);
         setIsSpeaking(false);
-        addLog('⚠️ Speech error - starting voice recording anyway');
+        addLog('⚠️ Speech error - click microphone button to respond');
         
-        // Still start VAD even on error
-        setTimeout(() => {
-          console.log('🎯 Starting VAD after speech error');
-          startServerVAD();
-        }, 500);
+        // Don't auto-start VAD on error - wait for user button click
+        setPhaseStatus('Your turn - click the microphone button to respond');
+        setLastSpeechEndTime(Date.now());
       };
       
       // Get available voices and select the best one
@@ -645,12 +807,12 @@ export default function ResumeInterviewPage() {
         }
       }, 100);
       
-      // Failsafe: If speech doesn't start in 3 seconds, start VAD anyway
+      // Failsafe: If speech doesn't start in 3 seconds, show ready message
       setTimeout(() => {
         if (!window.speechSynthesis.speaking && isSpeaking) {
-          console.warn('⚠️ Speech did not start - forcing VAD');
+          console.warn('⚠️ Speech did not start - showing ready message');
           setIsSpeaking(false);
-          startServerVAD();
+          setPhaseStatus('Your turn - click the microphone button to respond');
         }
       }, 3000);
       
@@ -678,6 +840,15 @@ export default function ResumeInterviewPage() {
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     try {
+      // Get authentication token
+      const token = await getToken();
+      if (!token) {
+        console.error('❌ No authentication token available');
+        setIsConnecting(false);
+        return;
+      }
+      
+      const WS_URL = getAuthenticatedWsUrl(token);
       console.log('🚀 Connecting to WebSocket at:', WS_URL);
       wsRef.current = new WebSocket(WS_URL);
       
@@ -712,8 +883,10 @@ export default function ResumeInterviewPage() {
       };
 
       wsRef.current.onerror = (e) => {
-        console.error('❌ WebSocket error:', e);
+        console.error('❌ Resume WebSocket error:', e);
+        addLog('❌ Connection error occurred');
         setIsConnecting(false);
+        setIsConnected(false);
       };
 
     wsRef.current.onmessage = (ev) => {
@@ -759,7 +932,8 @@ export default function ResumeInterviewPage() {
               setAnswer('');
               setPhaseStatus('Please write your code and click Submit when ready');
               console.log('💻 Code mode activated for question');
-              // For coding questions, don't auto-start recording
+              // Speak the coding question too
+              speakAndThenRecord(msg.next_question);
             } else {
               // Reset code when switching to text mode
               setCode('');
@@ -995,7 +1169,7 @@ export default function ResumeInterviewPage() {
           if (msg.interview_id && msg.download_url) {
             const resultsData = {
               interview_id: msg.interview_id,
-              download_url: `${HTTP_BASE}${msg.download_url}`,
+              download_url: `${getApiBase()}${msg.download_url}`,
               timestamp: new Date().toISOString(),
               interview_type: 'resume'
             };
@@ -1003,8 +1177,12 @@ export default function ResumeInterviewPage() {
           }
           // DO NOT NAVIGATE - Let completion screen handle navigation flow
         } else if (msg.type === 'error') {
-          // Don't show "ERROR:" in chat - only reset phase
+          // Show error message to user
+          console.error('❌ Backend error:', msg.error);
+          addLog(`❌ Error: ${msg.error || 'Unknown error occurred'}`);
           setPhaseStatus('');
+          setIsConnecting(false);
+          setIsConnected(false);
         } else {
           addLog('MSG: ' + ev.data);
         }
@@ -1032,6 +1210,7 @@ export default function ResumeInterviewPage() {
       return;
     }
     
+    const HTTP_BASE = getApiBase();
     setIsUploading(true);
     setUploadProgress(0);
     setUploadMessage('');
@@ -1461,6 +1640,16 @@ export default function ResumeInterviewPage() {
       if (wsRef.current) {
         wsRef.current.close();
       }
+      // Cleanup MediaRecorder
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping MediaRecorder on cleanup:', e);
+        }
+      }
+      // Reset recording state
+      setIsRecording(false);
       // Cleanup all timeouts
       if (endTimeoutRef.current) {
         clearTimeout(endTimeoutRef.current);
@@ -2093,6 +2282,28 @@ export default function ResumeInterviewPage() {
             {isCameraOn ? <Camera className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} /> : <CameraOff className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />}
           </motion.button>
           
+          {/* Record Answer Button - Manual toggle */}
+          <motion.button
+            whileHover={{ scale: isSpeaking ? 1 : 1.1 }}
+            whileTap={{ scale: isSpeaking ? 1 : 0.9 }}
+            onClick={startServerVAD}
+            disabled={isSpeaking}
+            aria-label={isRecording ? "Stop recording" : "Start recording"}
+            className={`${isMobile ? 'p-3' : 'p-4'} rounded-full transition-all min-h-[50px] min-w-[50px] flex items-center justify-center touch-manipulation ${
+              isRecording
+                ? 'bg-red-600 text-white shadow-lg shadow-red-500/50 ring-4 ring-red-300' 
+                : isSpeaking
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl'
+            }`}
+          >
+            {isRecording ? (
+              <Mic className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'} animate-pulse`} />
+            ) : (
+              <MicOff className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+            )}
+          </motion.button>
+          
           <motion.button
             whileHover={{ scale: isEndingInterview ? 1 : 1.05 }}
             whileTap={{ scale: isEndingInterview ? 1 : 0.95 }}
@@ -2371,5 +2582,14 @@ export default function ResumeInterviewPage() {
       </div>
     </div>
   </div>
+  );
+}
+
+// Wrap with Protected Route
+export default function ResumeInterviewPageWrapper() {
+  return (
+    <ProtectedRoute>
+      <ResumeInterviewPage />
+    </ProtectedRoute>
   );
 }

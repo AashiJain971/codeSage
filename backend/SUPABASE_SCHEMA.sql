@@ -28,6 +28,7 @@ CREATE TABLE interviews (
     -- Primary identifiers
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     session_id TEXT UNIQUE NOT NULL,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     
     -- Interview metadata
     interview_type TEXT NOT NULL DEFAULT 'technical',
@@ -95,6 +96,7 @@ CREATE TABLE question_responses (
 -- INDEXES FOR PERFORMANCE
 -- ===============================================================================
 CREATE INDEX idx_interviews_session_id ON interviews(session_id);
+CREATE INDEX idx_interviews_user_id ON interviews(user_id);
 CREATE INDEX idx_interviews_status ON interviews(status);
 CREATE INDEX idx_interviews_completion_method ON interviews(completion_method);
 CREATE INDEX idx_interviews_created_at ON interviews(created_at DESC);
