@@ -29,6 +29,9 @@ from groq import Groq
 # Import database operations
 from database import db
 
+# Import final results enrichment
+from final_results_enrichment import enrich_resume_interview_results, enrich_technical_interview_results
+
 # Get JWT secret for token verification
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
@@ -495,11 +498,11 @@ class TechnicalSession:
             # Ensure individual scores are numbers
             normalized_scores = [float(s) if isinstance(s, (int, float)) else 0 for s in self.scores]
 
-            # If this is a manual end, force completion_method
-            completion_method = final_results.get("completion_status") or final_results.get("completion_method")
-            if completion_method != "manually_ended" and final_results.get("interview_ended_manually"):
-                completion_method = "manually_ended"
+            # ✅ Extract completion_method from evaluation_metadata (single source of truth)
+            completion_method = final_results.get("evaluation_metadata", {}).get("completion_method", "automatic")
 
+            # ✅ final_results already contains all enriched data from LLM
+            # We need to update it with DB-specific fields, not wrap it
             results_data = {
                 "end_time": iso_end_time,
                 "start_time": iso_start_time,
@@ -508,9 +511,8 @@ class TechnicalSession:
                 "completed_questions": len([s for s in self.scores if s is not None]),
                 "average_score": float(self.get_final_score()),
                 "individual_scores": normalized_scores if normalized_scores else [float(s) for s in self.scores],
-                "final_results": final_results,
-                "completion_method": completion_method or "automatic",
-                **final_results  # Include all other result data
+                "final_results": final_results,  # ✅ This IS the enriched data
+                "completion_method": completion_method
             }
             print(f"[DB DEBUG] Writing interview completion: {json.dumps(results_data, default=str)[:500]}")
 
@@ -1343,6 +1345,136 @@ async def ws_endpoint(ws: WebSocket):
                 session["ended"] = True
                 session["force_stopped"] = True
                 
+                # CRITICAL: Save interview results before terminating
+                print(f"\n💾 FORCE STOP - Saving interview before termination")
+                print(f"Session ID: {session.get('session_id')}")
+                print(f"Interview ID: {session.get('interview_id')}")
+                print(f"Mode: {session.get('mode')}")
+                print(f"Conversation length: {len(session.get('conversation', []))}")
+                print(f"Individual scores: {session.get('individual_scores', [])}")
+                
+                try:
+                    if session and "conversation" in session and len(session.get("conversation", [])) > 0:
+                        # Use existing interview_id from session
+                        interview_id = session.get("interview_id")
+                        if not interview_id:
+                            interview_id = str(uuid.uuid4())
+                            print(f"⚠️ WARNING: No interview_id in session, creating new one: {interview_id}")
+                        
+                        end_time = time.time()
+                        conversation = session.get("conversation", [])
+                        individual_scores = session.get("individual_scores", [])
+                        
+                        if session.get("session_id") and interview_id:
+                            print(f"\n💾 SAVING {session.get('mode', 'unknown').upper()} INTERVIEW TO DATABASE (FORCE STOP)...")
+                            
+                            # Calculate duration
+                            duration = int(end_time - session.get("start_time", end_time))
+                            print(f"Duration: {duration}s ({duration//60}m {duration%60}s)")
+                            
+                            # Calculate scores
+                            if individual_scores:
+                                average_score = round(sum(individual_scores) / len(individual_scores))
+                            else:
+                                average_score = 0
+                            
+                            completed_questions = len(conversation)
+                            
+                            print(f"   ✓ Completed questions: {completed_questions}")
+                            print(f"   ✓ Individual scores: {individual_scores}")
+                            print(f"   ✓ Average score: {average_score}/100")
+                            
+                            # Transform conversation for enrichment
+                            print("\n🤖 Enriching final_results...")
+                            transformed_conversation = []
+                            for entry in conversation:
+                                if isinstance(entry, dict):
+                                    question_text = entry.get('next_question') or entry.get('content', '')
+                                    answer_text = entry.get('candidate') or entry.get('content', '')
+                                    eval_text = entry.get('evaluation', '')
+                                    score = entry.get('score', 0)
+                                    
+                                    if question_text or answer_text:
+                                        transformed_conversation.append({
+                                            "question": question_text,
+                                            "answer": answer_text,
+                                            "evaluation": eval_text,
+                                            "score": score / 10 if score > 10 else score
+                                        })
+                            
+                            try:
+                                enriched_final_results = enrich_resume_interview_results(
+                                    conversation=transformed_conversation,
+                                    individual_scores=individual_scores,
+                                    average_score=average_score,
+                                    duration=duration,
+                                    resume_text=session.get("resume_text", "")
+                                )
+                                print("✅ LLM enrichment successful")
+                            except Exception as e:
+                                print(f"⚠️ LLM enrichment failed: {e}")
+                                enriched_final_results = {
+                                    "interview_type": "resume",
+                                    "interview_summary": {
+                                        "overall_assessment": f"Interview force-stopped with {len(individual_scores)} questions answered",
+                                        "hire_recommendation": "borderline" if average_score < 70 else "yes",
+                                        "confidence_level": "medium"
+                                    },
+                                    "evaluation_metadata": {
+                                        "evaluation_model": "fallback",
+                                        "scoring_method": "basic",
+                                        "completion_method": "force_stopped",
+                                        "signals_used": ["conversation_length", "scores"]
+                                    }
+                                }
+                            
+                            # Build final_results_data
+                            final_results_data = {
+                                **enriched_final_results,
+                                "interview_id": interview_id,
+                                "timestamp": datetime.now().isoformat(),
+                                "conversation": conversation,
+                                "resume_id": session.get("resume_id"),
+                                "topics": session.get("topics", []),
+                                "total_interactions": len(conversation),
+                                "individual_scores": individual_scores,
+                                "questions_answered": len(individual_scores),
+                                "completed_questions": completed_questions,
+                                "average_score": average_score,
+                                "duration": duration
+                            }
+                            
+                            if "evaluation_metadata" in final_results_data:
+                                final_results_data["evaluation_metadata"]["completion_method"] = "force_stopped"
+                            
+                            # Save to database
+                            results_data = {
+                                "end_time": end_time,
+                                "duration": duration,
+                                "total_time": duration,
+                                "completed_questions": completed_questions,
+                                "current_question_index": completed_questions,
+                                "average_score": average_score,
+                                "individual_scores": individual_scores,
+                                "final_results": final_results_data,
+                                "completion_method": "force_stopped"
+                            }
+                            
+                            print(f"\n📦 Saving to database...")
+                            success = await db.complete_interview(session["session_id"], results_data)
+                            if success:
+                                print("✅ Force-stopped interview saved successfully")
+                            else:
+                                print(f"❌ DATABASE SAVE FAILED")
+                        else:
+                            print(f"⚠️ Cannot save - missing session_id or interview_id")
+                    else:
+                        print("⚠️ No conversation data to save")
+                except Exception as e:
+                    print(f"❌ ERROR saving force-stopped interview: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
                 # Send acknowledgment
                 await ws.send_text(json.dumps({
                     "type": "interview_stopped",
@@ -1977,35 +2109,19 @@ Resume:
                 # Save interview results before ending
                 try:
                     if session and "conversation" in session:
-                        interview_id = str(uuid.uuid4())
-                        end_time = time.time()
+                        # Use existing interview_id from session (created during init)
+                        interview_id = session.get("interview_id")
+                        if not interview_id:
+                            # Fallback: create new ID if somehow missing
+                            interview_id = str(uuid.uuid4())
+                            print(f"⚠️ WARNING: No interview_id in session, creating new one: {interview_id}")
                         
-                        # Build comprehensive final_results with conversation and feedback
+                        end_time = time.time()
                         conversation = session.get("conversation", [])
                         individual_scores = session.get("individual_scores", [])
                         
-                        # Extract feedback from conversation
-                        feedback_items = []
-                        for msg in conversation:
-                            if msg.get("role") == "assistant":
-                                feedback_items.append(msg.get("content", ""))
-                        
-                        interview_data = {
-                            "interview_id": interview_id,
-                            "timestamp": datetime.now().isoformat(),
-                            "interview_type": session.get("mode", "unknown"),
-                            "conversation": conversation,
-                            "resume_id": session.get("resume_id"),
-                            "topics": session.get("topics", []),
-                            "total_interactions": len(conversation),
-                            "feedback": "\n\n".join(feedback_items),  # All AI feedback combined
-                            "overall_feedback": f"Resume-based interview completed with {len(individual_scores)} questions answered. Average score: {round(sum(individual_scores) / len(individual_scores)) if individual_scores else 0}/100",
-                            "individual_scores": individual_scores,
-                            "questions_answered": len(individual_scores)
-                        }
-                        
                         # Save to database if session was tracked
-                        if session.get("session_id") and session.get("interview_id"):
+                        if session.get("session_id") and interview_id:
                             print(f"\n💾 SAVING {session.get('mode', 'unknown').upper()} INTERVIEW TO DATABASE...")
                             
                             # Calculate duration
@@ -2041,54 +2157,140 @@ Resume:
                             print(f"   ✓ Average score: {average_score}/100")
                             print(f"   ✓ Duration: {duration}s")
                             
+                            # 🔥 ENRICH final_results using LLM
+                            print("\n🤖 Enriching final_results with LLM...")
+                            print(f"   Conversation entries: {len(conversation)}")
+                            print(f"   First entry keys: {list(conversation[0].keys()) if conversation else 'EMPTY'}")
+                            
+                            # Transform conversation to expected format for enrichment
+                            # Session stores conversation as: 
+                            #   [{"candidate": "...", "score": X, "evaluation": "...", "next_question": "...", ...}]
+                            # Enrichment expects: 
+                            #   [{"question": "...", "answer": "...", "evaluation": "...", "score": X}]
+                            transformed_conversation = []
+                            for entry in conversation:
+                                if isinstance(entry, dict):
+                                    question_text = entry.get('next_question') or entry.get('content', '')
+                                    answer_text = entry.get('candidate') or entry.get('content', '')
+                                    eval_text = entry.get('evaluation', '')
+                                    score = entry.get('score', 0)
+                                    
+                                    # Only add if we have meaningful data
+                                    if question_text or answer_text:
+                                        transformed_conversation.append({
+                                            "question": question_text,
+                                            "answer": answer_text,
+                                            "evaluation": eval_text,
+                                            "score": score / 10 if score > 10 else score  # Normalize to 10-scale if needed
+                                        })
+                            
+                            print(f"   Transformed to {len(transformed_conversation)} Q&A rounds")
+                            if transformed_conversation:
+                                print(f"   First Q&A: Q='{transformed_conversation[0]['question'][:50]}...' A='{transformed_conversation[0]['answer'][:50]}...'")
+                            
+                            try:
+                                enriched_final_results = enrich_resume_interview_results(
+                                    conversation=transformed_conversation,
+                                    individual_scores=individual_scores,
+                                    average_score=average_score,
+                                    duration=duration,
+                                    resume_text=session.get("resume_text", "")
+                                )
+                                print("✅ LLM enrichment successful")
+                                print(f"   Hire recommendation: {enriched_final_results.get('interview_summary', {}).get('hire_recommendation', 'N/A')}")
+                            except Exception as e:
+                                print(f"⚠️ LLM enrichment failed: {e}. Using basic results.")
+                                import traceback
+                                traceback.print_exc()
+                                # Provide basic fallback structure
+                                enriched_final_results = {
+                                    "interview_type": "resume",
+                                    "interview_summary": {
+                                        "overall_assessment": f"Interview completed with {len(individual_scores)} questions answered",
+                                        "hire_recommendation": "borderline" if average_score < 70 else "yes",
+                                        "confidence_level": "medium"
+                                    },
+                                    "evaluation_metadata": {
+                                        "evaluation_model": "fallback",
+                                        "scoring_method": "basic",
+                                        "completion_method": "manually_ended",
+                                        "signals_used": ["conversation_length", "scores"]
+                                    }
+                                }
+                            
+                            # ✅ Build ONLY the structured final_results JSON (single source of truth)
+                            # Merge enriched LLM data with metadata
+                            final_results_data = {
+                                **enriched_final_results,  # LLM-enriched evaluation
+                                # Add metadata not in enrichment
+                                "interview_id": interview_id,
+                                "timestamp": datetime.now().isoformat(),
+                                "conversation": conversation,
+                                "resume_id": session.get("resume_id"),
+                                "topics": session.get("topics", []),
+                                "total_interactions": len(conversation),
+                                "individual_scores": individual_scores,
+                                "questions_answered": len(individual_scores),
+                                "completed_questions": completed_questions,
+                                "average_score": average_score,
+                                "duration": duration
+                            }
+                            
+                            # ✅ Update evaluation_metadata with correct completion_method
+                            if "evaluation_metadata" in final_results_data:
+                                final_results_data["evaluation_metadata"]["completion_method"] = "manually_ended"
+                            
                             # Complete the interview in database
                             results_data = {
                                 "end_time": end_time,
                                 "duration": duration,
                                 "total_time": duration,
                                 "completed_questions": completed_questions,
-                                "current_question_index": completed_questions,  # For resume, this equals completed_questions
-                                "average_score": average_score,  # ✅ Dynamically computed from individual_scores
-                                "individual_scores": individual_scores,  # ✅ Dynamically collected during interview
-                                "final_results": interview_data,
-                                "completion_method": "manually_ended"
+                                "current_question_index": completed_questions,
+                                "average_score": average_score,
+                                "individual_scores": individual_scores,
+                                "final_results": final_results_data,  # ✅ Structured enriched data
+                                "completion_method": final_results_data.get("evaluation_metadata", {}).get("completion_method", "manually_ended")
                             }
                             
-                            print(f"\n📤 Sending to database...")
-                            print(f"Results data keys: {list(results_data.keys())}")
+                            print(f"\n📦 RESULTS_DATA FOR DATABASE:")
+                            print(f"   end_time: {results_data['end_time']} (type: {type(results_data['end_time'])})")
+                            print(f"   duration: {results_data['duration']}s")
+                            print(f"   average_score: {results_data['average_score']}")
+                            print(f"   individual_scores: {results_data['individual_scores']}")
+                            print(f"   final_results size: {len(str(results_data['final_results']))} chars")
+                            print(f"   final_results keys: {list(results_data['final_results'].keys())}")
                             
-                            db_success = await db.complete_interview(session["session_id"], results_data)
-                            if db_success:
-                                print(f"✅ INTERVIEW SAVED TO DATABASE: session_id={session['session_id']}")
-                                print(f"   Database interview_id: {session['interview_id']}")
-                                
-                                # Invalidate cache so Past Interviews shows updated data immediately
-                                from database import _interviews_cache
+                            # Save to database
+                            success = await db.complete_interview(session["session_id"], results_data)
+                            if success:
+                                print("✅ Interview results saved to database successfully")
                                 _interviews_cache["data"] = None
                                 _interviews_cache["timestamp"] = 0
                                 print("🔄 Cache invalidated - Past Interviews will show fresh data")
                             else:
                                 print(f"❌ DATABASE SAVE FAILED - db.complete_interview returned False")
+                            
+                            # Also save to file for backup
+                            filename = f"interview_results_{interview_id}.json"
+                            results_dir = "interview_results"
+                            os.makedirs(results_dir, exist_ok=True)
+                            filepath = os.path.join(results_dir, filename)
+                            
+                            with open(filepath, 'w', encoding='utf-8') as f:
+                                json.dump(final_results_data, f, indent=2, ensure_ascii=False)
+                            print(f"💾 Backup saved to file: {filepath}")
+                            
+                            await ws.send_text(json.dumps({
+                                "type": "ended",
+                                "interview_id": interview_id,
+                                "download_url": f"/download_results/{interview_id}"
+                            }))
                         else:
                             print(f"\n❌ CANNOT SAVE TO DATABASE - Missing identifiers:")
                             print(f"   session_id: {session.get('session_id')}")
                             print(f"   interview_id: {session.get('interview_id')}")
-                        
-                        # Also save to file for backup
-                        filename = f"interview_results_{interview_id}.json"
-                        results_dir = "interview_results"
-                        os.makedirs(results_dir, exist_ok=True)
-                        filepath = os.path.join(results_dir, filename)
-                        
-                        with open(filepath, 'w', encoding='utf-8') as f:
-                            json.dump(interview_data, f, indent=2, ensure_ascii=False)
-                        print(f"💾 Backup saved to file: {filepath}")
-                        
-                        await ws.send_text(json.dumps({
-                            "type": "ended",
-                            "interview_id": interview_id,
-                            "download_url": f"/download_results/{interview_id}"
-                        }))
+                            await ws.send_text(json.dumps({"type": "ended"}))
                     else:
                         print("⚠️ No conversation data to save")
                         await ws.send_text(json.dumps({"type": "ended"}))
@@ -2326,23 +2528,55 @@ async def technical_ws_endpoint(ws: WebSocket):
                 
                 if session.current_question_index >= len(session.questions) - 1:
                     print("🎉 INTERVIEW SHOULD BE COMPLETE - Starting completion process")
-                    # Interview complete
+                    
+                    # 🔥 ENRICH final_results using LLM for technical interview
+                    print("\n🤖 Enriching technical interview final_results with LLM...")
+                    try:
+                        enriched_final_results = enrich_technical_interview_results(
+                            questions_data=session.questions,
+                            scores=session.scores,
+                            average_score=session.get_final_score(),
+                            code_submissions=session.code_submissions,
+                            voice_responses=session.voice_responses,
+                            duration=int(time.time() - session.start_time),
+                            topics=session.topics
+                        )
+                        print("✅ Technical LLM enrichment successful")
+                        print(f"   Hire recommendation: {enriched_final_results.get('interview_summary', {}).get('hire_recommendation', 'N/A')}")
+                        print(f"   Problem solving quality: {enriched_final_results.get('interview_summary', {}).get('problem_solving_quality', 'N/A')}")
+                    except Exception as e:
+                        print(f"⚠️ Technical LLM enrichment failed: {e}. Using basic results.")
+                        enriched_final_results = {}
+                    
+                    # ✅ Build ONLY the structured final_results JSON (single source of truth)
+                    completed_count = session.current_question_index + 1
+                    
+                    # Merge enriched LLM data with metadata
                     final_results = {
+                        **enriched_final_results,  # LLM-enriched evaluation
+                        # Add metadata not in enrichment
                         "session_id": session_id,
                         "topics": session.topics,
                         "total_questions": len(session.questions),
-                        "completed_questions": session.current_question_index + 1,
+                        "completed_questions": completed_count,
                         "average_score": session.get_final_score(),
                         "individual_scores": session.scores,
                         "total_time": time.time() - session.start_time,
                         "voice_responses": session.voice_responses,
                         "code_submissions": session.code_submissions,
-                        "questions_data": session.questions,
-                        "final_evaluation": session.final_evaluation,
-                        "interview_ended_manually": False
+                        "questions_data": session.questions[:completed_count],  # Only completed
+                        "final_evaluation": session.final_evaluation
                     }
                     
+                    # ✅ Update evaluation_metadata with correct completion_method
+                    if "evaluation_metadata" in final_results:
+                        final_results["evaluation_metadata"]["completion_method"] = "automatic"
+                    
                     # Store completion in database
+                    print(f"\n📤 Storing automatic completion in database...")
+                    print(f"🔍 final_results keys: {list(final_results.keys())}")
+                    print(f"🔍 final_results has enrichment: {bool(final_results.get('interview_summary'))}")
+                    print(f"🔍 Hire recommendation: {final_results.get('interview_summary', {}).get('hire_recommendation', 'N/A')}")
                     await session.complete_interview_in_db(final_results)
                     
                     # Save results to file (backup)
@@ -2540,28 +2774,56 @@ async def technical_ws_endpoint(ws: WebSocket):
                 print(f"   Questions completed: {len(session.scores)}")
                 print(f"   Current question index: {session.current_question_index}")
                 
-                # Calculate final results
+                # 🔥 ENRICH final_results using LLM for manually ended technical interview
+                print("\n🤖 Enriching manually ended technical interview with LLM...")
+                try:
+                    enriched_final_results = enrich_technical_interview_results(
+                        questions_data=session.questions[:len(session.scores)],  # Only completed questions
+                        scores=session.scores,
+                        average_score=session.get_final_score(),
+                        code_submissions=session.code_submissions,
+                        voice_responses=session.voice_responses,
+                        duration=int(total_duration),
+                        topics=session.topics
+                    )
+                    print("✅ Manual end technical LLM enrichment successful")
+                    print(f"   Hire recommendation: {enriched_final_results.get('interview_summary', {}).get('hire_recommendation', 'N/A')}")
+                except Exception as e:
+                    print(f"⚠️ Manual end technical LLM enrichment failed: {e}")
+                    enriched_final_results = {}
+                
+                # ✅ Build ONLY the structured final_results JSON (single source of truth)
+                completed_count = len(session.scores)
+                
+                # Merge enriched LLM data with metadata
                 final_results = {
+                    **enriched_final_results,  # LLM-enriched evaluation
+                    # Add metadata not in enrichment
                     "session_id": session_id,
                     "topics": session.topics,
                     "total_questions": len(session.questions),
-                    "completed_questions": len(session.scores),  # Use actual completed count
+                    "completed_questions": completed_count,
                     "average_score": session.get_final_score(),
                     "individual_scores": session.scores,
                     "total_time": total_duration,
                     "voice_responses": session.voice_responses,
                     "code_submissions": session.code_submissions,
-                    "questions_data": session.questions,
+                    "questions_data": session.questions[:completed_count],  # Only completed
                     "final_evaluation": session.final_evaluation,
-                    "interview_ended_manually": True,
-                    "completion_status": "manually_ended",
                     "end_time": current_time
                 }
+                
+                # ✅ Update evaluation_metadata with correct completion_method
+                if "evaluation_metadata" in final_results:
+                    final_results["evaluation_metadata"]["completion_method"] = "manually_ended"
                 
                 print("📤 Storing manual completion in database...")
                 print(f"🔍 Session ID: {session_id}")
                 print(f"🔍 Session object exists: {session is not None}")
                 print(f"🔍 Database module loaded: {'db' in globals()}")
+                print(f"🔍 final_results keys: {list(final_results.keys())}")
+                print(f"🔍 final_results has enrichment: {bool(final_results.get('interview_summary'))}")
+                print(f"🔍 Hire recommendation: {final_results.get('interview_summary', {}).get('hire_recommendation', 'N/A')}")
                 
                 # Store completion in database
                 success = await session.complete_interview_in_db(final_results)
@@ -2741,12 +3003,14 @@ Respond exactly like this:
             technical_correctness = evaluation.get("technical_correctness", "incorrect")
             
             # Determine base score from correctness level
+            # ✅ Never assign 0 to correct/mostly_correct solutions
             base_score_map = {
                 "fully_correct": 100,
-                "mostly_correct": 80,
-                "incorrect": 0  # Changed from 40 to 0 - wrong code gets 0
+                "mostly_correct": 75,  # Minimum 75 for partially correct
+                "partially_correct": 60,  # Minimum 60 for attempts with some correctness
+                "incorrect": 30  # Even incorrect attempts get 30 for trying
             }
-            base_score = base_score_map.get(technical_correctness, 0)
+            base_score = base_score_map.get(technical_correctness, 60)
             
             print(f"🎯 Technical Correctness: {technical_correctness} → Base Score: {base_score}")
             
@@ -2774,7 +3038,9 @@ Respond exactly like this:
                 print(f"  ⚠️ Clarification penalty: -{clarification_penalty} ({session.clarification_questions - 2} excessive × 5)")
             
             # Calculate final score
-            final_score = max(0, min(100, base_score - deductions))
+            # ✅ Ensure minimum score based on correctness level
+            min_score = 60 if technical_correctness in ["fully_correct", "mostly_correct"] else 30
+            final_score = max(min_score, min(100, base_score - deductions))
             
             print(f"📊 Score Calculation:")
             print(f"   Base ({technical_correctness}): {base_score}")

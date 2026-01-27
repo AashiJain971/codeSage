@@ -274,6 +274,10 @@ class InterviewDatabase:
             print(f"   Duration: {update_data['duration']} seconds")
             print(f"   Completed Questions: {update_data['completed_questions']}")
             print(f"   Average Score: {update_data['average_score']}")
+            print(f"   Final Results Type: {type(update_data['final_results'])}")
+            print(f"   Final Results Keys: {list(update_data['final_results'].keys()) if isinstance(update_data['final_results'], dict) else 'Not a dict'}")
+            print(f"   Has interview_type: {'interview_type' in update_data['final_results'] if isinstance(update_data['final_results'], dict) else False}")
+            print(f"   Has hire_recommendation: {bool(update_data['final_results'].get('interview_summary', {}).get('hire_recommendation')) if isinstance(update_data['final_results'], dict) else False}")
             
             # First check if the session exists
             try:

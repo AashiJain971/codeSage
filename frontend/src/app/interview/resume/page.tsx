@@ -143,6 +143,20 @@ function ResumeInterviewPage() {
         videoRef.current.play().catch(console.error);
       }
       
+      // Initialize speech synthesis on user gesture (required by browser autoplay policy)
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        // Trigger speech synthesis to "unlock" it for later use
+        const initUtterance = new SpeechSynthesisUtterance('');
+        initUtterance.onend = () => {
+          console.log('🔊 Speech synthesis initialized successfully');
+          // Force load voices
+          const voices = window.speechSynthesis.getVoices();
+          console.log(`🎤 Loaded ${voices.length} voices for speech synthesis`);
+        };
+        window.speechSynthesis.speak(initUtterance);
+        console.log('🔊 Speech synthesis initialization triggered');
+      }
+      
       addLog('Camera started successfully');
       console.log('✅ Camera and microphone initialized');
     } catch (error) {
@@ -717,43 +731,47 @@ function ResumeInterviewPage() {
     
     console.log('🔊 speakAndThenRecord called with text:', text.substring(0, 50) + '...');
     
-    // Ensure speechSynthesis is available and voices are loaded
+    // Ensure speechSynthesis is available
     if (!('speechSynthesis' in window)) {
       console.error('❌ speechSynthesis not available');
       setPhaseStatus('Your turn - click the microphone button to respond');
       return;
     }
     
-    // Force load voices if not already loaded
+    // Wait for voices to load with retry mechanism
     let voices = window.speechSynthesis.getVoices();
-    if (voices.length === 0) {
-      console.warn('⚠️ No voices loaded yet, triggering voice loading...');
-      // Trigger voice loading
-      window.speechSynthesis.getVoices();
-      // Small delay to allow voices to load
+    const MAX_RETRIES = 50; // 5 seconds max
+    const retryCount = (window as any).__voiceLoadRetries || 0;
+    
+    if (voices.length === 0 && retryCount < MAX_RETRIES) {
+      console.warn(`⚠️ Voices not loaded yet (retry ${retryCount}/${MAX_RETRIES})`);
+      (window as any).__voiceLoadRetries = retryCount + 1;
+      window.speechSynthesis.getVoices(); // Trigger loading
       return setTimeout(() => speakAndThenRecord(text), 100);
     }
     
-    // Don't interrupt ongoing speech unless this is a new important question
+    (window as any).__voiceLoadRetries = 0; // Reset on success
+    
+    if (voices.length === 0) {
+      console.error('❌ No voices available after retries');
+      setPhaseStatus('Your turn - click the microphone button to respond');
+      return;
+    }
+    
+    // Cancel ongoing speech for new questions
     if (window.speechSynthesis.speaking) {
-      console.log('⏸️ Speech already in progress');
-      
-      // Only cancel for new questions (indicated by length or question mark)
       const isNewQuestion = text.includes('?') || text.length > 100;
-      
       if (!isNewQuestion) {
-        console.log('⏩ Not interrupting current speech for continuation');
-        return; // Don't interrupt for short continuations
+        console.log('⏩ Not interrupting for continuation');
+        return;
       }
-      
-      console.log('🔄 Cancelling current speech for new question');
+      console.log('🔄 Cancelling for new question');
       window.speechSynthesis.cancel();
     }
     
     setPhaseStatus('AI is speaking...');
     
     try {
-      console.log('🎶 Creating speech utterance...');
       const utterance = new SpeechSynthesisUtterance(text);
       
       // Speech settings
@@ -762,80 +780,52 @@ function ResumeInterviewPage() {
       utterance.volume = 1.0;
       utterance.lang = 'en-US';
       
-      console.log('🎶 Utterance created successfully');
-      
       setIsSpeaking(true);
       const startTime = Date.now();
       
       utterance.onstart = () => {
-        const elapsed = Date.now() - startTime;
-        console.log(`🗣️ Speech started successfully in ${elapsed}ms`);
+        console.log(`🗣️ Speech started (${Date.now() - startTime}ms)`);
         setPhaseStatus('AI is speaking...');
       };
       
       utterance.onend = () => {
-        const duration = Date.now() - startTime;
-        console.log(`✅ Speech ended after ${duration}ms`);
+        console.log(`✅ Speech ended (${Date.now() - startTime}ms)`);
         setIsSpeaking(false);
         setLastSpeechEndTime(Date.now());
-        
-        // Don't auto-start VAD - wait for user to click record button
         setPhaseStatus('Your turn - click the microphone button to respond');
-        console.log('🎯 Waiting for user to click record button');
       };
       
       utterance.onerror = (e) => {
-        console.error('❌ Speech synthesis error:', e);
-        console.error('  - Error type:', e.error);
-        console.error('  - Character index:', e.charIndex);
+        console.error('❌ Speech error:', e.error);
+        if (e.error === 'not-allowed') {
+          console.error('🔒 Speech not allowed - click camera to enable');
+        }
         setIsSpeaking(false);
-        addLog('⚠️ Speech error - click microphone button to respond');
-        
-        // Don't auto-start VAD on error - wait for user button click
         setPhaseStatus('Your turn - click the microphone button to respond');
         setLastSpeechEndTime(Date.now());
       };
       
-      // Get available voices and select the best one
+      // Select voice - prefer default English voice (original behavior)
       const availableVoices = window.speechSynthesis.getVoices();
-      console.log('🎤 Available voices:', availableVoices.length);
       if (availableVoices.length > 0) {
-        // Try to find an English voice, prefer female for interview setting
-        let selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.includes('female'));
-        if (!selectedVoice) {
-          selectedVoice = availableVoices.find(v => v.lang.startsWith('en')) || availableVoices[0];
-        }
-        utterance.voice = selectedVoice;
-        console.log('🎤 Selected voice:', selectedVoice.name, selectedVoice.lang);
-      } else {
-        console.warn('⚠️ No voices available yet, using default');
+        const englishVoice = availableVoices.find(v => v.lang.startsWith('en')) || availableVoices[0];
+        utterance.voice = englishVoice;
+        console.log('🎤 Using voice:', englishVoice.name);
       }
       
-      console.log('📢 Calling window.speechSynthesis.speak()...');
+      console.log('📢 Speaking...');
       window.speechSynthesis.speak(utterance);
-      console.log('📢 speak() called successfully');
       
-      // Force resume in case it's paused (Safari issue)
+      // Resume if paused (Safari fix)
       setTimeout(() => {
         if (window.speechSynthesis.paused) {
-          console.log('▶️ Resuming paused speech synthesis');
           window.speechSynthesis.resume();
         }
       }, 100);
       
-      // Failsafe: If speech doesn't start in 3 seconds, show ready message
-      setTimeout(() => {
-        if (!window.speechSynthesis.speaking && isSpeaking) {
-          console.warn('⚠️ Speech did not start - showing ready message');
-          setIsSpeaking(false);
-          setPhaseStatus('Your turn - click the microphone button to respond');
-        }
-      }, 3000);
-      
     } catch (e) {
       console.error('❌ Error in speakAndThenRecord:', e);
       setIsSpeaking(false);
-      addLog('⚠️ Could not speak - question: ' + text.substring(0, 100));
       setPhaseStatus('Your turn - click the microphone button to respond');
     }
   };
