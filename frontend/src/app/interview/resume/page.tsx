@@ -188,10 +188,18 @@ function ResumeInterviewPage() {
   // Initialize speech synthesis voices
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      // Load voices
+      // Load voices multiple times to ensure they're available
       const loadVoices = () => {
         const voices = window.speechSynthesis.getVoices();
         console.log('🎤 Speech voices loaded:', voices.length);
+        if (voices.length === 0) {
+          console.warn('⚠️ No voices loaded, retrying...');
+          // Retry after a short delay
+          setTimeout(() => {
+            const retryVoices = window.speechSynthesis.getVoices();
+            console.log('🔄 Retry - voices loaded:', retryVoices.length);
+          }, 500);
+        }
       };
 
       // Load voices immediately
@@ -709,6 +717,23 @@ function ResumeInterviewPage() {
     
     console.log('🔊 speakAndThenRecord called with text:', text.substring(0, 50) + '...');
     
+    // Ensure speechSynthesis is available and voices are loaded
+    if (!('speechSynthesis' in window)) {
+      console.error('❌ speechSynthesis not available');
+      setPhaseStatus('Your turn - click the microphone button to respond');
+      return;
+    }
+    
+    // Force load voices if not already loaded
+    let voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      console.warn('⚠️ No voices loaded yet, triggering voice loading...');
+      // Trigger voice loading
+      window.speechSynthesis.getVoices();
+      // Small delay to allow voices to load
+      return setTimeout(() => speakAndThenRecord(text), 100);
+    }
+    
     // Don't interrupt ongoing speech unless this is a new important question
     if (window.speechSynthesis.speaking) {
       console.log('⏸️ Speech already in progress');
@@ -726,18 +751,6 @@ function ResumeInterviewPage() {
     }
     
     setPhaseStatus('AI is speaking...');
-    
-    // Ensure voices are loaded
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length === 0) {
-      console.warn('⚠️ No voices loaded yet, attempting to load...');
-      window.speechSynthesis.getVoices();
-      // Give it a moment to load
-      setTimeout(() => {
-        const retryVoices = window.speechSynthesis.getVoices();
-        console.log('🔄 Retry voice count:', retryVoices.length);
-      }, 100);
-    }
     
     try {
       console.log('🎶 Creating speech utterance...');
@@ -784,13 +797,16 @@ function ResumeInterviewPage() {
       };
       
       // Get available voices and select the best one
-      const voices = window.speechSynthesis.getVoices();
-      console.log('🎤 Available voices:', voices.length);
-      if (voices.length > 0) {
-        // Try to find an English voice
-        const englishVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
-        utterance.voice = englishVoice;
-        console.log('🎤 Selected voice:', englishVoice.name, englishVoice.lang);
+      const availableVoices = window.speechSynthesis.getVoices();
+      console.log('🎤 Available voices:', availableVoices.length);
+      if (availableVoices.length > 0) {
+        // Try to find an English voice, prefer female for interview setting
+        let selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.includes('female'));
+        if (!selectedVoice) {
+          selectedVoice = availableVoices.find(v => v.lang.startsWith('en')) || availableVoices[0];
+        }
+        utterance.voice = selectedVoice;
+        console.log('🎤 Selected voice:', selectedVoice.name, selectedVoice.lang);
       } else {
         console.warn('⚠️ No voices available yet, using default');
       }
@@ -820,7 +836,7 @@ function ResumeInterviewPage() {
       console.error('❌ Error in speakAndThenRecord:', e);
       setIsSpeaking(false);
       addLog('⚠️ Could not speak - question: ' + text.substring(0, 100));
-      setTimeout(startServerVAD, 500);
+      setPhaseStatus('Your turn - click the microphone button to respond');
     }
   };
 
@@ -1295,6 +1311,21 @@ function ResumeInterviewPage() {
       console.error('❌ No resume ID');
       addLog('Upload resume first');
       return;
+    }
+    
+    // CRITICAL: Ensure voices are loaded before starting interview
+    if ('speechSynthesis' in window) {
+      const voices = window.speechSynthesis.getVoices();
+      console.log(`🎤 Current voices available: ${voices.length}`);
+      if (voices.length === 0) {
+        console.warn('⚠️ No voices loaded yet, triggering load...');
+        // Trigger voice loading and retry after short delay
+        window.speechSynthesis.getVoices();
+        setTimeout(() => {
+          const retryVoices = window.speechSynthesis.getVoices();
+          console.log(`🎤 After retry: ${retryVoices.length} voices available`);
+        }, 200);
+      }
     }
     
     const initMessage = { 

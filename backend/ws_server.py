@@ -613,61 +613,77 @@ class TechnicalSession:
 def extract_score_from_evaluation(evaluation_text: str) -> int:
     """
     Extract numerical score from LLM evaluation text.
-    Expected formats: "Rating: 7/10" or "Score: 85/100" or standalone numbers
+    Looks for "Rating: X/10" format in the evaluation text.
+    Dynamically computes score based on evaluation criteria.
     Returns: integer score (0-100 scale)
     """
     import re
     
     if not evaluation_text:
         print("⚠️ No evaluation text provided, returning default score 50")
-        return 50  # Default neutral score
+        return 50
     
-    print(f"🔍 Extracting score from evaluation: '{evaluation_text[:150]}...'")
+    print(f"🔍 Extracting score from evaluation: '{evaluation_text[:200]}...'")
     
-    # Try to find "X/10" or "X/100" patterns
-    match = re.search(r'(\d+)\s*/\s*(\d+)', evaluation_text)
-    if match:
-        score, max_score = int(match.group(1)), int(match.group(2))
-        # Normalize to 100-point scale
-        normalized = int((score / max_score) * 100)
-        final_score = min(100, max(0, normalized))  # Clamp to 0-100
-        print(f"✅ Extracted {score}/{max_score} -> normalized to {final_score}/100")
-        return final_score
+    # PRIORITY 1: Look for explicit "Rating: X/10" format (most reliable)
+    rating_match = re.search(r'Rating:\s*(\d+)\s*/\s*10', evaluation_text, re.IGNORECASE)
+    if rating_match:
+        rating = int(rating_match.group(1))
+        normalized = min(100, max(0, rating * 10))  # Convert 0-10 to 0-100
+        print(f"✅ FOUND explicit 'Rating: {rating}/10' -> {normalized}/100")
+        return normalized
     
-    # Look for "Rating: X" or "Score: X" patterns
-    match = re.search(r'(?:rating|score)\s*:?\s*(\d{1,3})', evaluation_text, re.IGNORECASE)
-    if match:
-        score = int(match.group(1))
-        if score <= 10:
-            final_score = min(100, max(0, score * 10))  # Convert 0-10 scale to 0-100
-            print(f"✅ Extracted rating {score}/10 -> {final_score}/100")
-            return final_score
-        elif score <= 100:
-            final_score = min(100, max(0, score))
-            print(f"✅ Extracted score {final_score}/100")
-            return final_score
+    # PRIORITY 2: Look for "X/10" or "X/100" fractional patterns
+    fraction_match = re.search(r'(\d+)\s*/\s*(\d+)', evaluation_text)
+    if fraction_match:
+        score, max_score = int(fraction_match.group(1)), int(fraction_match.group(2))
+        if max_score in [10, 100]:
+            normalized = int((score / max_score) * 100) if max_score == 10 else score
+            normalized = min(100, max(0, normalized))
+            print(f"✅ Found fraction {score}/{max_score} -> {normalized}/100")
+            return normalized
     
-    # Fallback: look for standalone numbers that might be scores
-    match = re.search(r'\b([0-9])\s*/\s*10\b', evaluation_text)  # Match "8 / 10" format more explicitly
-    if match:
-        score = int(match.group(1)) * 10
-        print(f"✅ Extracted X/10 format -> {score}/100")
-        return score
+    # PRIORITY 3: Dynamic evaluation scoring based on content analysis
+    # Use heuristics to estimate score from evaluation text content
+    text_lower = evaluation_text.lower()
     
-    # Last resort: look for any number between 0-10 or 0-100
-    numbers = re.findall(r'\b(\d{1,3})\b', evaluation_text)
-    for num_str in numbers:
-        num = int(num_str)
-        if 0 <= num <= 10:
-            final_score = num * 10
-            print(f"🔄 Fallback: Found number {num}, assuming 0-10 scale -> {final_score}/100")
-            return final_score
-        elif 0 <= num <= 100:
-            print(f"🔄 Fallback: Found number {num}, assuming 0-100 scale")
-            return num
+    # Analyze evaluation for quality indicators
+    positive_keywords = ['excellent', 'outstanding', 'strong', 'comprehensive', 'impressive',
+                        'detailed', 'insightful', 'thoughtful', 'well-articulated', 'thorough']
+    good_keywords = ['good', 'solid', 'clear', 'appropriate', 'demonstrates', 'correct',
+                     'shows understanding', 'adequate']
+    adequate_keywords = ['partially', 'somewhat', 'could improve', 'missing details', 'brief',
+                        'lacks depth', 'incomplete']
+    poor_keywords = ['incorrect', 'vague', 'unclear', 'off-topic', 'failed', 'poor',
+                     'confused', 'contradicts']
     
-    print("❌ No score found in evaluation, returning default 60")
-    return 60  # Slightly above neutral default if no score found
+    excellent_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
+    good_count = sum(1 for keyword in good_keywords if keyword in text_lower)
+    adequate_count = sum(1 for keyword in adequate_keywords if keyword in text_lower)
+    poor_count = sum(1 for keyword in poor_keywords if keyword in text_lower)
+    
+    # Calculate weighted score (0-100)
+    if excellent_count >= 2:
+        base_score = 85 + (excellent_count * 2)
+    elif excellent_count >= 1:
+        base_score = 80
+    elif good_count >= 2:
+        base_score = 70 + (good_count * 2)
+    elif good_count >= 1:
+        base_score = 65
+    elif adequate_count >= 2:
+        base_score = 50 + (adequate_count * 2)
+    else:
+        base_score = 55
+    
+    # Adjust down for poor indicators
+    if poor_count > 0:
+        base_score = max(20, base_score - (poor_count * 15))
+    
+    final_score = min(100, max(0, base_score))
+    print(f"📊 Dynamic scoring: excellent={excellent_count}, good={good_count}, adequate={adequate_count}, poor={poor_count}")
+    print(f"✅ DYNAMIC SCORE COMPUTED: {final_score}/100")
+    return final_score
 
 # -----------------------------
 # App setup
@@ -1389,7 +1405,7 @@ async def ws_endpoint(ws: WebSocket):
                         "interview_type": "resume",
                         "topics": ["Resume-Based"],
                         "start_time": start_time,
-                        "total_questions": 10  # Estimate - will be updated on completion with actual count
+                        "total_questions": 0  # Will be updated dynamically as questions are asked
                     }
                     interview_id = await db.create_interview_session(session_data, user_id)
                     session["interview_id"] = interview_id
@@ -1442,33 +1458,32 @@ You are conducting a live mock job interview with the candidate, using their res
       4. Recommendation (hire / no hire / needs more practice)
 
 ### Response Format:
-Always reply in JSON:
+ALWAYS reply in JSON with this EXACT structure:
 {
-  "evaluation": "Brief feedback on the candidate's last response. MUST include a rating in format 'Rating: X/10' where X is 0-10.",
+  "evaluation": "MANDATORY: Brief feedback with EXACTLY 'Rating: X/10' where X is 0-10. Example: 'Rating: 7/10 - Good understanding with clear examples.' Include feedback about technical knowledge, depth, clarity, and resume relevance.",
   "next_question": "Your next question for the candidate.",
   "hint": "Optional hint if asked.",
   "final_feedback": "Only include this at the end."
 }
 
-### Evaluation Scoring:
-For EVERY candidate response, evaluate based on these criteria and assign a score 0-10:
+### Evaluation Scoring - CRITICAL:
+For EVERY candidate response, assign a score 0-10 BASED ON:
 
-**Evaluation Criteria:**
+**Evaluation Criteria (Dynamic Real-Time):**
 1. Technical/Role Knowledge (30%): Does the answer demonstrate relevant technical skills or role-specific expertise mentioned in their resume?
 2. Depth & Examples (25%): Does the candidate provide specific examples, details, or go beyond surface-level explanations?
 3. Resume Relevance (20%): Does the answer align with what's stated in their resume? Are they expanding appropriately on resume content?
 4. Clarity of Communication (15%): Is the explanation clear, well-structured, and easy to understand?
 5. Candidate Initiative (10%): Does the candidate show proactivity, self-correction, or thoughtful discussion beyond just answering?
 
-**Score Scale:**
-- Include "Rating: X/10" in your evaluation field for EVERY response
-- 0-3/10: Poor (off-topic, vague, contradicts resume, unclear, passive)
-- 4-5/10: Below Average (partially correct but missing key details, lacks depth, some inconsistencies)
-- 6-7/10: Good (correct and clear, matches resume, adequate explanation)
-- 8-9/10: Excellent (detailed with examples, insightful, demonstrates strong expertise, proactive)
-- 10/10: Outstanding (goes beyond expectations, exceptional depth, shows leadership/innovation)
+**Score Scale (0-10):**
+- 0-3: Poor (off-topic, vague, contradicts resume, unclear, passive)
+- 4-5: Below Average (partially correct but missing key details, lacks depth, some inconsistencies)
+- 6-7: Good (correct and clear, matches resume, adequate explanation)
+- 8-9: Excellent (detailed with examples, insightful, demonstrates strong expertise, proactive)
+- 10: Outstanding (goes beyond expectations, exceptional depth, shows leadership/innovation)
 
-**Important:** Always include "Rating: X/10" in the evaluation text.
+**MANDATORY REQUIREMENT: EVERY evaluation MUST include "Rating: X/10" format. Example: "Rating: 7/10 - Strong technical understanding..."**
 
 Resume:
 """ + resume_text
@@ -1554,6 +1569,21 @@ Resume:
                     # Track score
                     session["individual_scores"].append(score)
                     print(f"Individual scores so far: {session['individual_scores']}")
+                    
+                    # CRITICAL: Update interviews table in REAL-TIME with current scores
+                    if session.get("session_id"):
+                        try:
+                            current_avg = round(sum(session["individual_scores"]) / len(session["individual_scores"]))
+                            progress_update = {
+                                "completed_questions": len(session["conversation"]),
+                                "current_question_index": len(session["conversation"]),
+                                "average_score": current_avg,
+                                "individual_scores": session["individual_scores"]
+                            }
+                            await db.update_interview_progress(session["session_id"], progress_update)
+                            print(f"✅ REAL-TIME UPDATE: interviews table updated with avg={current_avg}, scores={session['individual_scores']}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to update interviews table in real-time: {e}")
                     
                     # Store in database (question_responses table)
                     print(f"\n💾 DATABASE STORAGE ATTEMPT")
@@ -1687,6 +1717,21 @@ Resume:
                     # Track score
                     session["individual_scores"].append(score)
                     print(f"Individual scores so far: {session['individual_scores']}")
+                    
+                    # CRITICAL: Update interviews table in REAL-TIME with current scores
+                    if session.get("session_id"):
+                        try:
+                            current_avg = round(sum(session["individual_scores"]) / len(session["individual_scores"]))
+                            progress_update = {
+                                "completed_questions": len(session["conversation"]),
+                                "current_question_index": len(session["conversation"]),
+                                "average_score": current_avg,
+                                "individual_scores": session["individual_scores"]
+                            }
+                            await db.update_interview_progress(session["session_id"], progress_update)
+                            print(f"✅ REAL-TIME UPDATE: interviews table updated with avg={current_avg}, scores={session['individual_scores']}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to update interviews table in real-time: {e}")
                     
                     # Store in database
                     print(f"\n💾 DATABASE STORAGE ATTEMPT (code)")
@@ -1843,6 +1888,21 @@ Resume:
                     # Track score
                     session["individual_scores"].append(score)
                     
+                    # CRITICAL: Update interviews table in REAL-TIME with current scores
+                    if session.get("session_id"):
+                        try:
+                            current_avg = round(sum(session["individual_scores"]) / len(session["individual_scores"]))
+                            progress_update = {
+                                "completed_questions": len(session["conversation"]),
+                                "current_question_index": len(session["conversation"]),
+                                "average_score": current_avg,
+                                "individual_scores": session["individual_scores"]
+                            }
+                            await db.update_interview_progress(session["session_id"], progress_update)
+                            print(f"✅ REAL-TIME UPDATE: interviews table updated with avg={current_avg}, scores={session['individual_scores']}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to update interviews table in real-time: {e}")
+                    
                     # Store in database (question_responses table)
                     print(f"📊 DEBUG - session_id: {session.get('session_id')}, interview_id: {session.get('interview_id')}")
                     if session.get("session_id") and session.get("interview_id"):
@@ -1920,14 +1980,28 @@ Resume:
                         interview_id = str(uuid.uuid4())
                         end_time = time.time()
                         
+                        # Build comprehensive final_results with conversation and feedback
+                        conversation = session.get("conversation", [])
+                        individual_scores = session.get("individual_scores", [])
+                        
+                        # Extract feedback from conversation
+                        feedback_items = []
+                        for msg in conversation:
+                            if msg.get("role") == "assistant":
+                                feedback_items.append(msg.get("content", ""))
+                        
                         interview_data = {
                             "interview_id": interview_id,
                             "timestamp": datetime.now().isoformat(),
                             "interview_type": session.get("mode", "unknown"),
-                            "conversation": session["conversation"],
+                            "conversation": conversation,
                             "resume_id": session.get("resume_id"),
                             "topics": session.get("topics", []),
-                            "total_interactions": len(session["conversation"])
+                            "total_interactions": len(conversation),
+                            "feedback": "\n\n".join(feedback_items),  # All AI feedback combined
+                            "overall_feedback": f"Resume-based interview completed with {len(individual_scores)} questions answered. Average score: {round(sum(individual_scores) / len(individual_scores)) if individual_scores else 0}/100",
+                            "individual_scores": individual_scores,
+                            "questions_answered": len(individual_scores)
                         }
                         
                         # Save to database if session was tracked

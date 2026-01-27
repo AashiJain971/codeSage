@@ -191,6 +191,13 @@ class InterviewDatabase:
             
             if "completed_questions" in progress_data:
                 update_data["completed_questions"] = progress_data["completed_questions"]
+            
+            # CRITICAL: Update scores in real-time
+            if "average_score" in progress_data:
+                update_data["average_score"] = progress_data["average_score"]
+            
+            if "individual_scores" in progress_data:
+                update_data["individual_scores"] = progress_data["individual_scores"]
                 
             if update_data:
                 update_data["updated_at"] = datetime.utcnow().isoformat()
@@ -240,6 +247,10 @@ class InterviewDatabase:
             if individual_scores:
                 individual_scores = [int(score) if isinstance(score, float) else score for score in individual_scores]
             
+            # Extract final_results from results_data if present, otherwise use results_data itself
+            # This prevents double-wrapping when results_data already contains final_results
+            final_results_value = results_data.get("final_results", results_data)
+            
             update_data = {
                 "status": "completed",
                 "end_time": end_time,
@@ -249,8 +260,8 @@ class InterviewDatabase:
                 "current_question_index": results_data.get("current_question_index", 0),
                 "average_score": average_score,
                 "individual_scores": individual_scores,
-                # Store the complete results payload for audit
-                "final_results": results_data,
+                # Store the interview data in final_results (conversation, feedback, etc.)
+                "final_results": final_results_value,
                 # Normalize completion_method key: prefer completion_status or completion_method
                 "completion_method": results_data.get("completion_status") or results_data.get("completion_method") or "automatic",
                 "updated_at": datetime.utcnow().isoformat()
@@ -405,7 +416,7 @@ class InterviewDatabase:
                 print("❌ Supabase not configured")
                 return []
             params = {
-                "select": "session_id,interview_type,topics,status,completion_method,total_questions,completed_questions,average_score,duration,created_at",
+                "select": "session_id,interview_type,topics,status,completion_method,total_questions,completed_questions,average_score,individual_scores,duration,created_at,final_results,id",
                 "order": "created_at.desc",
                 "limit": limit,
             }
@@ -425,8 +436,8 @@ class InterviewDatabase:
             # Use simpler query
             result = self.supabase.table("interviews").select(
                 "session_id, interview_type, topics, status, completion_method, "
-                "total_questions, completed_questions, average_score, "
-                "duration, created_at"
+                "total_questions, completed_questions, average_score, individual_scores, "
+                "duration, created_at, final_results, id"
             ).order("created_at", desc=True).limit(limit).execute()
             
             if result.data:
