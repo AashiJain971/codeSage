@@ -36,12 +36,12 @@ const Features = () => {
       id: 3,
       icon: (
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
         </svg>
       ),
-      title: 'Past Interview Analytics',
-      description: 'Review all your past interviews with detailed performance metrics, and visual analytics. View structured interview summaries, skill-wise evaluations, and AI recommendations generated from past interviews.'
+      title: 'Interview Profile & Portfolio',
+      description: 'Build a verified, portable interview credential. Share your AI-evaluated profile with recruiters featuring skill assessments, performance trends, and trust-backed interview history. Your professional interview asset.'
     },
     {
       id: 4,

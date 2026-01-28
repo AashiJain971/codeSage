@@ -27,10 +27,10 @@ const Navbar = ({ theme = 'light' }: NavbarProps) => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-    const navLinks = [
+  const navLinks = [
     { href: '/', label: 'Home' },
     { href: '/interview', label: 'Take Interview' },
-    { href: '/past-interviews', label: 'Past Interviews' }
+    { href: '/profile', label: 'Profile' }
   ];
 
   const isActive = (href: string) => {
