@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getApiBase, authenticatedFetch } from '@/lib/api';
 import SkillRadarChart from '@/components/charts/SkillRadarChart';
 import PerformanceTrendChart from '@/components/charts/PerformanceTrendChart';
+import LanguageDistributionChart from '@/components/charts/LanguageDistributionChart';
 import InterviewTimelineChart from '@/components/charts/InterviewTimelineChart';
 import SkillDistributionChart from '@/components/charts/SkillDistributionChart';
 import BehavioralSignalEvolutionChart from '@/components/charts/BehavioralSignalEvolutionChart';
@@ -391,58 +392,26 @@ function ProfilePage() {
               {profileData.performance.recent_scores.length > 0 && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Performance Trend */}
-                  <div className="bg-white rounded-xl shadow-md p-6">
+                  <div className="bg-white rounded-xl shadow-md p-6 overflow-hidden">
                     <div className="flex items-center gap-3 mb-6">
                       <TrendingUp className="w-6 h-6 text-purple-600" />
                       <h2 className="text-xl font-bold text-gray-900">Performance Trend</h2>
                     </div>
-                    <PerformanceTrendChart 
-                      scores={profileData.performance.recent_scores}
-                      dates={profileData.performance.dates}
-                    />
+                    <div className="overflow-hidden">
+                      <PerformanceTrendChart 
+                        scores={profileData.performance.recent_scores}
+                        dates={profileData.performance.dates}
+                      />
+                    </div>
                   </div>
 
-                  {/* Success Rate */}
+                  {/* Language Distribution */}
                   <div className="bg-white rounded-xl shadow-md p-6">
                     <div className="flex items-center gap-3 mb-6">
-                      <BarChart3 className="w-6 h-6 text-indigo-600" />
-                      <h2 className="text-xl font-bold text-gray-900">Success Rate</h2>
+                      <Code2 className="w-6 h-6 text-indigo-600" />
+                      <h2 className="text-xl font-bold text-gray-900">Languages Used</h2>
                     </div>
-                    <div className="flex items-center justify-center h-full">
-                      <div className="text-center">
-                        <div className="relative w-32 h-32 mx-auto mb-4">
-                          <svg className="transform -rotate-90 w-32 h-32">
-                            <circle
-                              cx="64"
-                              cy="64"
-                              r="56"
-                              stroke="#e5e7eb"
-                              strokeWidth="12"
-                              fill="none"
-                            />
-                            <circle
-                              cx="64"
-                              cy="64"
-                              r="56"
-                              stroke="#6366f1"
-                              strokeWidth="12"
-                              fill="none"
-                              strokeDasharray={`${(profileData.stats.average_score * 3.51)} 351`}
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-3xl font-bold text-indigo-600">
-                              {Math.round(profileData.stats.average_score)}%
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-gray-600 text-sm">Overall Success</p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Across {profileData.stats.total_interviews} interviews
-                        </p>
-                      </div>
-                    </div>
+                    <LanguageDistributionChart interviews={profileData.interviews} />
                   </div>
                 </div>
               )}
@@ -648,13 +617,15 @@ function ProfilePage() {
                                         const codeSubmission = q.code_submission || '';
                                         const feedback = q.feedback || '';  // Question-specific feedback from LLM
                                         const hintsUsed = q.hints_used || 0;
+                                        const language = q.language || 'python';
+                                        const timeTaken = q.time_taken || 0;
                                         
                                         return (
                                           <div key={i} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
                                             {/* Question Header */}
                                             <div className="flex items-start justify-between mb-3">
                                               <div className="flex-1">
-                                                <div className="flex items-center gap-2 mb-2">
+                                                <div className="flex items-center gap-2 mb-2 flex-wrap">
                                                   <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">Q{q.question_index || i + 1}</span>
                                                   <span className={`px-2 py-1 text-xs font-medium rounded ${
                                                     q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
@@ -667,6 +638,21 @@ function ProfilePage() {
                                                   }`}>
                                                     {q.difficulty?.toUpperCase() || 'N/A'}
                                                   </span>
+                                                  {interview.type === 'technical' && (
+                                                    <span className="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-medium rounded">
+                                                      {language.toUpperCase()}
+                                                    </span>
+                                                  )}
+                                                  {hintsUsed > 0 && (
+                                                    <span className="px-2 py-1 bg-orange-100 text-orange-700 text-xs font-medium rounded">
+                                                      💡 {hintsUsed} hint{hintsUsed > 1 ? 's' : ''}
+                                                    </span>
+                                                  )}
+                                                  {timeTaken > 0 && (
+                                                    <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                                                      ⏱️ {Math.floor(timeTaken / 60)}:{(timeTaken % 60).toString().padStart(2, '0')}
+                                                    </span>
+                                                  )}
                                                   {q.topics && Array.isArray(q.topics) && q.topics.map((topic: string, ti: number) => (
                                                     <span key={ti} className="px-2 py-1 bg-purple-50 text-purple-600 text-xs rounded">
                                                       {topic}
@@ -699,12 +685,7 @@ function ProfilePage() {
                                               <div className="mb-3">
                                                 <div className="flex items-center gap-2 mb-2">
                                                   <Code2 className="w-4 h-4 text-green-600" />
-                                                  <span className="text-sm font-semibold text-gray-900">Your Code Solution</span>
-                                                  {hintsUsed > 0 && (
-                                                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded ml-auto">
-                                                      {hintsUsed} hint{hintsUsed > 1 ? 's' : ''} used
-                                                    </span>
-                                                  )}
+                                                  <span className="text-sm font-semibold text-gray-900">Your Code Solution ({language})</span>
                                                 </div>
                                                 <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs max-h-64">
                                                   <code>{codeSubmission}</code>

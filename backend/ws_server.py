@@ -510,7 +510,7 @@ class TechnicalSession:
         except Exception as e:
             print(f"❌ Error updating progress in database: {e}")
     
-    async def store_question_response_in_db(self, question_index: int, user_response: str, score: int, feedback: str):
+    async def store_question_response_in_db(self, question_index: int, user_response: str, score: int, feedback: str, language: str = "python"):
         """Store individual question response in database"""
         try:
             # Convert internal 0-based question_index to 1-based for storage
@@ -525,7 +525,8 @@ class TechnicalSession:
                     "feedback": feedback,
                     "time_taken": int(time.time() - self.question_start_time),
                     "hints_used": self.hints_used,
-                    "difficulty": question.get("difficulty", "medium")
+                    "difficulty": question.get("difficulty", "medium"),
+                    "language": language
                 }
 
                 await db.store_question_response(self.session_id, db_question_index, question_data)
@@ -3069,12 +3070,13 @@ async def technical_ws_endpoint(ws: WebSocket):
                 # Send feedback to user
                 feedback_msg = f"Question {session.current_question_index + 1} completed! {question_specific_feedback}"
                 
-                # Store question response in database with question-specific feedback
+                # Store question response in database with question-specific feedback and language
                 await session.store_question_response_in_db(
                     session.current_question_index, 
                     msg.get("code", ""), 
                     score, 
-                    question_specific_feedback  # Use the specific feedback, not generic message
+                    question_specific_feedback,  # Use the specific feedback, not generic message
+                    language  # Include the language used for this question
                 )
                 
                 await ws.send_text(json.dumps({

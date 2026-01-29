@@ -483,6 +483,7 @@ class InterviewDatabase:
                 "time_taken": question_data.get("time_taken"),
                 "hints_used": question_data.get("hints_used", 0),
                 "difficulty": question_data.get("difficulty"),
+                "language": question_data.get("language", "python"),
                 "created_at": datetime.utcnow().isoformat()
             }
             

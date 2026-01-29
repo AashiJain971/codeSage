@@ -40,7 +40,7 @@ export default function PerformanceTrendChart({ scores, dates }: PerformanceTren
     canvas.style.height = `${dimensions.height}px`;
     ctx.scale(dpr, dpr);
 
-    const padding = { top: 40, right: 30, bottom: 70, left: 70 };
+    const padding = { top: 30, right: 20, bottom: 60, left: 60 };
     const chartWidth = dimensions.width - padding.left - padding.right;
     const chartHeight = dimensions.height - padding.top - padding.bottom;
 
@@ -89,13 +89,13 @@ export default function PerformanceTrendChart({ scores, dates }: PerformanceTren
 
     // Axis labels
     ctx.fillStyle = '#4b5563';
-    ctx.font = '13px Inter, sans-serif';
+    ctx.font = '12px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Interview Timeline →', dimensions.width / 2, dimensions.height - 15);
+    ctx.fillText('Interview Timeline →', dimensions.width / 2, dimensions.height - 10);
 
     // Y-axis label
     ctx.save();
-    ctx.translate(20, dimensions.height / 2);
+    ctx.translate(15, dimensions.height / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = 'center';
     ctx.fillText('Score (%) →', 0, 0);
