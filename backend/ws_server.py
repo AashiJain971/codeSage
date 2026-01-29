@@ -1302,6 +1302,127 @@ async def export_interviews(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def generate_swot_analysis(completed_interviews: List[Dict], skills: Dict, stats: Dict, interview_list: List[Dict]) -> Dict:
+    """
+    Generate comprehensive SWOC/T analysis using LLM based on all interview data.
+    Analyzes: Technical skills, Behavioral skills, Problem-solving, Communication, Growth trajectory
+    """
+    if not client or not completed_interviews:
+        return None
+    
+    try:
+        # Prepare interview summary for LLM
+        interview_summary = []
+        for interview in interview_list[:15]:  # Recent 15 interviews
+            final_results = interview.get("final_results", {})
+            interview_summary.append({
+                "type": interview["type"],
+                "date": interview["date"],
+                "score": interview["score"],
+                "topics": interview["topics"],
+                "duration_minutes": round(interview.get("duration_seconds", 0) / 60, 1),
+                "questions_completed": interview.get("questions_completed", 0),
+                "feedback_summary": final_results.get("feedback", "") if isinstance(final_results, dict) else ""
+            })
+        
+        # Build comprehensive prompt
+        prompt = f"""You are an expert technical recruiter and career advisor analyzing a candidate's interview performance data.
+
+CANDIDATE PERFORMANCE DATA:
+==========================
+
+Overall Statistics:
+- Total Interviews: {stats['total_interviews']}
+- Average Score: {stats['average_score']:.1f}%
+- Completion Rate: {stats['completion_rate']:.1f}%
+- Performance Trend: {stats['trend']}
+- Total Questions Attempted: {stats['total_questions']}
+
+Skill Breakdown (0-100%):
+- Problem Solving: {skills.get('problem_solving', 0):.1f}%
+- Communication: {skills.get('communication', 0):.1f}%
+- Code Quality: {skills.get('code_quality', 0):.1f}%
+- Technical Depth: {skills.get('technical_depth', 0):.1f}%
+- System Design: {skills.get('system_design', 0):.1f}%
+- Behavioral/Soft Skills: {skills.get('behavioral', 0):.1f}%
+
+Recent Interview History:
+{json.dumps(interview_summary, indent=2)}
+
+TASK:
+=====
+Provide a comprehensive SWOC/T (Strengths, Weaknesses, Opportunities, Challenges/Threats) analysis.
+
+Your analysis should:
+1. **STRENGTHS**: Identify 4-6 key strengths across technical skills, behavioral competencies, problem-solving ability, communication, consistency, and growth trajectory. Be specific with percentages and evidence.
+
+2. **WEAKNESSES**: Identify 4-6 areas needing improvement. Include technical gaps, behavioral concerns, and performance inconsistencies. Be constructive and specific.
+
+3. **OPPORTUNITIES**: Identify 4-6 growth opportunities based on current skill level and market trends. Suggest specific technical domains, learning paths, or interview strategies.
+
+4. **CHALLENGES/THREATS**: Identify 4-6 challenges or potential obstacles. Consider skill gaps relative to industry standards, competitive pressures, and areas requiring urgent attention.
+
+5. **CURRENT_STAGE**: Provide a 1-2 sentence assessment of where the candidate stands (e.g., "Junior Developer", "Mid-Level SWE Ready", "Senior IC Track").
+
+6. **LONGITUDINAL_GROWTH**: Provide a 2-3 sentence analysis of growth trajectory based on trend and score progression.
+
+7. **KEY_RECOMMENDATIONS**: Provide 3-4 specific, actionable recommendations prioritized by impact.
+
+8. **TECHNICAL_READINESS**: Rate readiness for technical interviews (0-100%) with brief justification.
+
+9. **BEHAVIORAL_READINESS**: Rate readiness for behavioral interviews (0-100%) with brief justification.
+
+RESPONSE FORMAT (JSON):
+{{
+  "strengths": ["strength 1", "strength 2", ...],
+  "weaknesses": ["weakness 1", "weakness 2", ...],
+  "opportunities": ["opportunity 1", "opportunity 2", ...],
+  "threats": ["challenge/threat 1", "challenge/threat 2", ...],
+  "current_stage": "assessment of current level",
+  "longitudinal_growth": "analysis of growth trajectory and trends",
+  "key_recommendations": ["recommendation 1", "recommendation 2", ...],
+  "technical_readiness": {{"score": 0-100, "justification": "brief explanation"}},
+  "behavioral_readiness": {{"score": 0-100, "justification": "brief explanation"}},
+  "detailed_breakdown": {{
+    "hard_skills": {{"assessment": "detailed assessment", "score": 0-100}},
+    "soft_skills": {{"assessment": "detailed assessment", "score": 0-100}},
+    "problem_solving": {{"assessment": "detailed assessment", "score": 0-100}},
+    "communication": {{"assessment": "detailed assessment", "score": 0-100}},
+    "consistency": {{"assessment": "detailed assessment", "score": 0-100}},
+    "growth_mindset": {{"assessment": "detailed assessment", "score": 0-100}}
+  }}
+}}
+
+Be honest, specific, and actionable. Use data points from the interview history to support your analysis."""
+
+        # Call LLM
+        print(f"🎯 Generating SWOC/T analysis for {stats['total_interviews']} interviews...")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=3000
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Extract JSON from response
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+        
+        swot_data = json.loads(content)
+        print(f"✅ SWOC/T analysis generated successfully")
+        return swot_data
+        
+    except Exception as e:
+        print(f"❌ Error generating SWOC/T analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 @app.get("/api/profile")
 async def get_user_profile(user_id: str = Depends(get_current_user)):
     """Get comprehensive user profile with skills, performance, and interview history"""
@@ -1423,42 +1544,55 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
         recent_scores = [i["score"] for i in recent_for_chart]
         recent_dates = [i["date"] for i in recent_for_chart]
         
-        # Generate strengths and improvements based on skills
-        strengths = []
-        improvements = []
+        # Sort interviews by date for analysis (need this before SWOC/T generation)
+        sorted_interviews = sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)
         
-        sorted_skills = sorted(skills.items(), key=lambda x: x[1], reverse=True)
-        for skill, value in sorted_skills[:3]:
-            if value >= 70:
-                strengths.append(f"Strong {skill.replace('_', ' ')} capabilities ({value}%)")
+        # Generate comprehensive SWOC/T analysis using LLM
+        swot_analysis = await generate_swot_analysis(
+            completed_interviews=completed_interviews,
+            skills=skills,
+            stats={
+                "total_interviews": total_interviews,
+                "average_score": average_score,
+                "completion_rate": completion_rate,
+                "trend": trend,
+                "total_questions": total_questions
+            },
+            interview_list=sorted_interviews[:20]  # Use recent 20 for analysis
+        )
         
-        for skill, value in sorted_skills[-3:]:
-            if value < 70:
-                improvements.append(f"Develop {skill.replace('_', ' ')} skills (currently {value}%)")
-        
-        # Add performance-based strengths
-        if completion_rate >= 80:
-            strengths.append(f"High completion rate ({completion_rate:.0f}%)")
-        if average_score >= 75:
-            strengths.append(f"Consistent high performance (avg {average_score:.0f}%)")
-        if trend == "improving":
-            strengths.append("Demonstrating continuous improvement")
-        
-        # Add default strengths if list is empty
-        if not strengths:
-            strengths = [
-                "Active interview participant",
-                "Building technical interview experience",
-                "Committed to skill development"
-            ]
-        
-        # Add default improvements if list is empty
-        if not improvements:
-            improvements = [
-                "Continue practicing to build consistency",
-                "Focus on completing more interviews",
-                "Strengthen foundational skills"
-            ]
+        # Fallback to simple analysis if LLM fails
+        if not swot_analysis or not swot_analysis.get("strengths"):
+            strengths = []
+            improvements = []
+            
+            sorted_skills = sorted(skills.items(), key=lambda x: x[1], reverse=True)
+            for skill, value in sorted_skills[:3]:
+                if value >= 70:
+                    strengths.append(f"Strong {skill.replace('_', ' ')} capabilities ({value}%)")
+            
+            for skill, value in sorted_skills[-3:]:
+                if value < 70:
+                    improvements.append(f"Develop {skill.replace('_', ' ')} skills (currently {value}%)")
+            
+            if completion_rate >= 80:
+                strengths.append(f"High completion rate ({completion_rate:.0f}%)")
+            if average_score >= 75:
+                strengths.append(f"Consistent high performance (avg {average_score:.0f}%)")
+            if trend == "improving":
+                strengths.append("Demonstrating continuous improvement")
+            
+            if not strengths:
+                strengths = ["Active interview participant", "Building technical interview experience"]
+            if not improvements:
+                improvements = ["Continue practicing to build consistency", "Focus on completing more interviews"]
+            
+            swot_analysis = {
+                "strengths": strengths,
+                "weaknesses": improvements,
+                "opportunities": ["Expand technical skill range", "Seek real-world project experience"],
+                "threats": ["Rapidly evolving technology landscape", "Competitive job market"]
+            }
         
         # Calculate trust score
         trust_score = min(100, (
@@ -1470,9 +1604,8 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
         
         # Prepare interview list with full details (limit to recent 50)
         interview_list = []
-        sorted_interviews = sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]
         
-        for i in sorted_interviews:
+        for i in sorted_interviews[:50]:  # Use already sorted list
             # Fetch question responses for this interview using the session_id (stored as 'id' in formatted data)
             session_id = i.get("id")  # format_interview_data sets id = session_id
             questions_data = await db.get_question_responses(session_id) if session_id else []
@@ -1511,8 +1644,9 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
                 "dates": recent_dates
             },
             "interviews": interview_list,
-            "strengths": strengths,
-            "improvements": improvements,
+            "strengths": swot_analysis.get("strengths", []),
+            "improvements": swot_analysis.get("weaknesses", []),
+            "swot_analysis": swot_analysis,  # Full SWOC/T breakdown
             "trustScore": round(trust_score, 0)
         }
         

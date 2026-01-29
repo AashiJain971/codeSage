@@ -64,6 +64,25 @@ interface ProfileData {
   }[];
   strengths: string[];
   improvements: string[];
+  swot_analysis?: {
+    strengths: string[];
+    weaknesses: string[];
+    opportunities: string[];
+    threats: string[];
+    current_stage: string;
+    longitudinal_growth: string;
+    key_recommendations: string[];
+    technical_readiness: { score: number; justification: string };
+    behavioral_readiness: { score: number; justification: string };
+    detailed_breakdown: {
+      hard_skills: { assessment: string; score: number };
+      soft_skills: { assessment: string; score: number };
+      problem_solving: { assessment: string; score: number };
+      communication: { assessment: string; score: number };
+      consistency: { assessment: string; score: number };
+      growth_mindset: { assessment: string; score: number };
+    };
+  };
   shareableUrl?: string;
   trustScore: number;
 }
@@ -920,8 +939,218 @@ function ProfilePage() {
                 </>
               )}
 
-              {/* Strengths & Improvements */}
-              {(profileData.strengths.length > 0 || profileData.improvements.length > 0) && (
+              {/* Comprehensive SWOC/T Analysis */}
+              {profileData.swot_analysis && (
+                <div className="space-y-6">
+                  {/* Header with Current Stage */}
+                  <div className="bg-gradient-to-r from-cyan-50 to-violet-50 rounded-xl shadow-md p-6 border border-cyan-100">
+                    <div className="flex items-center gap-3 mb-4">
+                      <Trophy className="w-7 h-7 text-violet-600" />
+                      <h2 className="text-2xl font-bold text-gray-900">Comprehensive Career Analysis</h2>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3">
+                        <Target className="w-5 h-5 text-violet-600 flex-shrink-0 mt-1" />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-700">Current Stage</p>
+                          <p className="text-lg text-gray-900">{profileData.swot_analysis.current_stage}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <TrendingUp className="w-5 h-5 text-cyan-600 flex-shrink-0 mt-1" />
+                        <div>
+                          <p className="text-sm font-semibold text-gray-700">Growth Trajectory</p>
+                          <p className="text-gray-800">{profileData.swot_analysis.longitudinal_growth}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Readiness Scores */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                      <div className="flex items-center gap-3 mb-3">
+                        <Code2 className="w-6 h-6 text-blue-600" />
+                        <h3 className="text-lg font-bold text-gray-900">Technical Readiness</h3>
+                      </div>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <span className="text-3xl font-bold text-blue-600">
+                          {profileData.swot_analysis.technical_readiness.score}%
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600">{profileData.swot_analysis.technical_readiness.justification}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                      <div className="flex items-center gap-3 mb-3">
+                        <MessageSquare className="w-6 h-6 text-purple-600" />
+                        <h3 className="text-lg font-bold text-gray-900">Behavioral Readiness</h3>
+                      </div>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <span className="text-3xl font-bold text-purple-600">
+                          {profileData.swot_analysis.behavioral_readiness.score}%
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600">{profileData.swot_analysis.behavioral_readiness.justification}</p>
+                    </div>
+                  </div>
+
+                  {/* SWOC/T Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Strengths */}
+                    <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Star className="w-6 h-6 text-green-600" />
+                        <h3 className="text-xl font-bold text-gray-900">Strengths</h3>
+                      </div>
+                      <ul className="space-y-2.5">
+                        {profileData.swot_analysis.strengths.map((strength, idx) => (
+                          <motion.li
+                            key={idx}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="flex items-start gap-2"
+                          >
+                            <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-1" />
+                            <span className="text-sm text-gray-700">{strength}</span>
+                          </motion.li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Weaknesses */}
+                    <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-orange-500">
+                      <div className="flex items-center gap-3 mb-4">
+                        <AlertCircle className="w-6 h-6 text-orange-600" />
+                        <h3 className="text-xl font-bold text-gray-900">Areas for Improvement</h3>
+                      </div>
+                      <ul className="space-y-2.5">
+                        {profileData.swot_analysis.weaknesses.map((weakness, idx) => (
+                          <motion.li
+                            key={idx}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="flex items-start gap-2"
+                          >
+                            <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0 mt-1" />
+                            <span className="text-sm text-gray-700">{weakness}</span>
+                          </motion.li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Opportunities */}
+                    <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Zap className="w-6 h-6 text-blue-600" />
+                        <h3 className="text-xl font-bold text-gray-900">Growth Opportunities</h3>
+                      </div>
+                      <ul className="space-y-2.5">
+                        {profileData.swot_analysis.opportunities.map((opportunity, idx) => (
+                          <motion.li
+                            key={idx}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="flex items-start gap-2"
+                          >
+                            <Zap className="w-4 h-4 text-blue-600 flex-shrink-0 mt-1" />
+                            <span className="text-sm text-gray-700">{opportunity}</span>
+                          </motion.li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Threats/Challenges */}
+                    <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Shield className="w-6 h-6 text-red-600" />
+                        <h3 className="text-xl font-bold text-gray-900">Challenges to Address</h3>
+                      </div>
+                      <ul className="space-y-2.5">
+                        {profileData.swot_analysis.threats.map((threat, idx) => (
+                          <motion.li
+                            key={idx}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="flex items-start gap-2"
+                          >
+                            <Shield className="w-4 h-4 text-red-600 flex-shrink-0 mt-1" />
+                            <span className="text-sm text-gray-700">{threat}</span>
+                          </motion.li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Detailed Breakdown */}
+                  <div className="bg-white rounded-xl shadow-md p-6">
+                    <div className="flex items-center gap-3 mb-5">
+                      <BarChart3 className="w-6 h-6 text-violet-600" />
+                      <h3 className="text-xl font-bold text-gray-900">Competency Breakdown</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {Object.entries(profileData.swot_analysis.detailed_breakdown).map(([key, value]) => (
+                        <div key={key} className="p-4 bg-gray-50 rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-semibold text-gray-700 capitalize">
+                              {key.replace('_', ' ')}
+                            </h4>
+                            <span className={`text-lg font-bold ${
+                              value.score >= 75 ? 'text-green-600' : 
+                              value.score >= 60 ? 'text-blue-600' : 
+                              value.score >= 40 ? 'text-orange-600' : 'text-red-600'
+                            }`}>
+                              {value.score}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                            <div 
+                              className={`h-2 rounded-full ${
+                                value.score >= 75 ? 'bg-green-600' : 
+                                value.score >= 60 ? 'bg-blue-600' : 
+                                value.score >= 40 ? 'bg-orange-600' : 'bg-red-600'
+                              }`}
+                              style={{ width: `${value.score}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-gray-600 leading-relaxed">{value.assessment}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Key Recommendations */}
+                  <div className="bg-gradient-to-r from-violet-50 to-cyan-50 rounded-xl shadow-md p-6 border border-violet-100">
+                    <div className="flex items-center gap-3 mb-4">
+                      <Brain className="w-6 h-6 text-violet-600" />
+                      <h3 className="text-xl font-bold text-gray-900">Prioritized Recommendations</h3>
+                    </div>
+                    <ol className="space-y-3">
+                      {profileData.swot_analysis.key_recommendations.map((rec, idx) => (
+                        <motion.li
+                          key={idx}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.1 }}
+                          className="flex items-start gap-3"
+                        >
+                          <span className="flex-shrink-0 w-7 h-7 bg-violet-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                            {idx + 1}
+                          </span>
+                          <span className="text-gray-800 pt-1">{rec}</span>
+                        </motion.li>
+                      ))}
+                    </ol>
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback: Simple Strengths & Improvements (if SWOC/T not available) */}
+              {!profileData.swot_analysis && (profileData.strengths.length > 0 || profileData.improvements.length > 0) && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Strengths */}
                   {profileData.strengths.length > 0 && (
