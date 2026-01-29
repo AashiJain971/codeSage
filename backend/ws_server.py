@@ -2889,17 +2889,35 @@ async def technical_ws_endpoint(ws: WebSocket):
                 
                 print(f"Question {session.current_question_index + 1} scored: {score}/100")
                 
-                # Send feedback to user
-                feedback_msg = f"Question {session.current_question_index + 1} completed! Score: {score}/100"
-                if session.final_evaluation:
-                    feedback_msg += f"\n{session.final_evaluation.get('feedback', '')}"
+                # Extract question-specific feedback from LLM evaluation
+                question_specific_feedback = ""
+                if session.final_evaluation and isinstance(session.final_evaluation, dict):
+                    # Use the detailed feedback from the LLM for this specific question
+                    question_specific_feedback = session.final_evaluation.get('feedback', '')
+                    if not question_specific_feedback:
+                        # Fallback to constructing from evaluation details
+                        correctness = session.final_evaluation.get('technical_correctness', 'unknown')
+                        reason = session.final_evaluation.get('correctness_reason', '')
+                        improvements = session.final_evaluation.get('areas_for_improvement', [])
+                        
+                        feedback_parts = [f"Score: {score}/100"]
+                        if reason:
+                            feedback_parts.append(reason)
+                        if improvements:
+                            feedback_parts.append("Areas for improvement: " + ", ".join(improvements[:2]))
+                        question_specific_feedback = " ".join(feedback_parts)
+                else:
+                    question_specific_feedback = f"Score: {score}/100"
                 
-                # Store question response in database
+                # Send feedback to user
+                feedback_msg = f"Question {session.current_question_index + 1} completed! {question_specific_feedback}"
+                
+                # Store question response in database with question-specific feedback
                 await session.store_question_response_in_db(
                     session.current_question_index, 
                     msg.get("code", ""), 
                     score, 
-                    feedback_msg
+                    question_specific_feedback  # Use the specific feedback, not generic message
                 )
                 
                 await ws.send_text(json.dumps({

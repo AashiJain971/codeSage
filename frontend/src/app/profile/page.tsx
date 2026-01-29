@@ -622,17 +622,13 @@ function ProfilePage() {
                                     </h4>
                                     <div className="space-y-4">
                                       {interview.questions_data.map((q: any, i: number) => {
-                                        const score = interview.final_results?.individual_scores?.[i] || 0;
-                                        const code = interview.code_submissions?.find((c: any) => 
-                                          c.question_id === q.id || c.question_id === q.question_number || c.question_id === (i + 1)
-                                        );
-                                        const voiceResponse = interview.voice_responses?.find((v: any) => 
-                                          v.question_id === q.id || v.question_id === q.question_number || v.question_id === (i + 1)
-                                        );
-                                        const feedback = interview.final_results?.final_evaluation?.feedback || 
-                                                        interview.final_results?.feedback ||
-                                                        interview.final_results?.interview_summary?.overall_assessment;
-                                        const hintsUsed = code?.hints_used_so_far || 0;
+                                        // Use question-specific data from database
+                                        const score = q.score || 0;
+                                        const questionText = q.question_text || q.question || 'Question not available';
+                                        const userResponse = q.user_response || '';
+                                        const codeSubmission = q.code_submission || '';
+                                        const feedback = q.feedback || '';  // Question-specific feedback from LLM
+                                        const hintsUsed = q.hints_used || 0;
                                         
                                         return (
                                           <div key={i} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
@@ -640,21 +636,25 @@ function ProfilePage() {
                                             <div className="flex items-start justify-between mb-3">
                                               <div className="flex-1">
                                                 <div className="flex items-center gap-2 mb-2">
-                                                  <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">Q{i + 1}</span>
+                                                  <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded">Q{q.question_index || i + 1}</span>
                                                   <span className={`px-2 py-1 text-xs font-medium rounded ${
                                                     q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
                                                     q.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-red-100 text-red-700'
+                                                    q.difficulty === 'hard' ? 'bg-red-100 text-red-700' :
+                                                    q.difficulty === 'very hard' ? 'bg-red-200 text-red-800' :
+                                                    q.difficulty === 'conversational' ? 'bg-pink-100 text-pink-700' :
+                                                    q.difficulty === 'intermediate' ? 'bg-orange-100 text-orange-700' :
+                                                    'bg-gray-100 text-gray-700'
                                                   }`}>
-                                                    {q.difficulty?.toUpperCase()}
+                                                    {q.difficulty?.toUpperCase() || 'N/A'}
                                                   </span>
-                                                  {q.topics?.map((topic: string, ti: number) => (
+                                                  {q.topics && Array.isArray(q.topics) && q.topics.map((topic: string, ti: number) => (
                                                     <span key={ti} className="px-2 py-1 bg-purple-50 text-purple-600 text-xs rounded">
                                                       {topic}
                                                     </span>
                                                   ))}
                                                 </div>
-                                                <p className="text-sm text-gray-700 mb-2">{q.question}</p>
+                                                <p className="text-sm text-gray-700 mb-2 font-medium">{questionText}</p>
                                               </div>
                                               <div className="ml-4 text-right">
                                                 <div className={`text-2xl font-bold ${getScoreColor(score)}`}>
@@ -664,32 +664,31 @@ function ProfilePage() {
                                               </div>
                                             </div>
 
-                                            {/* Candidate's Response */}
-                                            {voiceResponse && (
-                                              <div className="mb-3 p-3 bg-blue-50 rounded-lg">
+                                            {/* Candidate's Response (text/voice) */}
+                                            {userResponse && (
+                                              <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
                                                 <div className="flex items-center gap-2 mb-2">
-                                                  <Zap className="w-4 h-4 text-blue-600" />
-                                                  <span className="text-sm font-semibold text-blue-900">Candidate's Approach</span>
+                                                  <MessageSquare className="w-4 h-4 text-blue-600" />
+                                                  <span className="text-sm font-semibold text-blue-900">Your Response</span>
                                                 </div>
-                                                <p className="text-sm text-blue-800 italic">"{voiceResponse.transcript}"</p>
+                                                <p className="text-sm text-blue-800">{userResponse}</p>
                                               </div>
                                             )}
 
                                             {/* Code Submission */}
-                                            {code && code.code && !code.code.includes('# Write your solution here') && (
+                                            {codeSubmission && !codeSubmission.includes('# Write your solution here') && (
                                               <div className="mb-3">
                                                 <div className="flex items-center gap-2 mb-2">
                                                   <Code2 className="w-4 h-4 text-green-600" />
                                                   <span className="text-sm font-semibold text-gray-900">Your Code Solution</span>
-                                                  <span className="ml-auto text-xs text-gray-500 uppercase font-mono">{code.language}</span>
                                                   {hintsUsed > 0 && (
-                                                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">
+                                                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded ml-auto">
                                                       {hintsUsed} hint{hintsUsed > 1 ? 's' : ''} used
                                                     </span>
                                                   )}
                                                 </div>
                                                 <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs max-h-64">
-                                                  <code>{code.code}</code>
+                                                  <code>{codeSubmission}</code>
                                                 </pre>
                                               </div>
                                             )}
