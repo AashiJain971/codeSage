@@ -201,8 +201,20 @@ def generate_technical_question(topics: List[str], difficulty: str = "medium") -
     
     if not client:
         print("❌ Groq client not available, using fallback question")
+        # Generate a more specific fallback question based on topics
+        topic_name = topics[0] if topics else "Data Structures"
+        specific_questions = {
+            "Arrays": "Given an array of integers, find the maximum sum of a contiguous subarray. Implement a solution and explain your approach.",
+            "Strings": "Given a string, find the longest substring without repeating characters. Explain your approach and implement the solution.",
+            "Linked Lists": "Reverse a singly linked list. Explain your approach, handle edge cases, and implement the solution.",
+            "Trees": "Given a binary tree, find its maximum depth. Explain your approach and implement the solution.",
+            "Graphs": "Given a directed graph, implement a function to detect if there is a cycle. Explain your approach using DFS or similar algorithm.",
+            "Dynamic Programming": "Given an array of integers, find the length of the longest increasing subsequence. Explain your approach and implement the solution.",
+            "Sorting": "Implement merge sort algorithm. Explain the approach, time complexity, and implement the solution.",
+            "Binary Search": "Given a sorted array and a target value, implement binary search to find the index of the target. Explain edge cases."
+        }
         fallback = {
-            "question": f"Write a function to solve a {difficulty} problem related to {', '.join(topics)}. Explain your approach first.",
+            "question": specific_questions.get(topic_name, f"Given a problem involving {topic_name}, implement an efficient solution. Start by explaining your approach, discussing time/space complexity, and then write the code."),
             "difficulty": difficulty,
             "topics": topics,
             "hints": ["Think about the data structures you need", "Consider the time complexity", "Don't forget edge cases"],
@@ -242,15 +254,26 @@ def _generate_question_with_llm(topics: List[str], topics_str: str, difficulty: 
     import json
     
     prompt = f"""
-You are a senior technical interviewer. Generate a coding interview question as a JSON object.
+You are a senior technical interviewer. Generate a SPECIFIC, DETAILED coding interview question as a JSON object.
 
 Topics: {topics_str}
 Difficulty: {difficulty}
 
+CRITICAL REQUIREMENTS:
+1. The question MUST be specific and detailed - NOT vague like "solve a problem related to X"
+2. Include concrete examples with sample inputs and expected outputs
+3. Clearly state what the function should do
+4. For graph problems: specify if directed/undirected, weighted/unweighted, what to return
+5. For array problems: specify constraints, what to find/return
+6. For string problems: specify exact requirements
+
+BAD EXAMPLE (too vague): "Write a function to solve a hard problem related to Graphs"
+GOOD EXAMPLE: "Given a directed weighted graph represented as an adjacency list, implement Dijkstra's algorithm to find the shortest path from a source node to all other nodes. Return a dictionary mapping each node to its shortest distance from the source."
+
 Format your response exactly like this (no extra text, no markdown):
 
 {{
-    "question": "Write a clear problem description with examples",
+    "question": "Write a SPECIFIC problem with clear requirements, constraints, and examples. Include sample input/output.",
     "difficulty": "{difficulty}",
     "topics": {json.dumps(topics)},
     "hints": [
@@ -3307,6 +3330,17 @@ async def llm_evaluate_code_submission(session: TechnicalSession, code: str, lan
     
     if is_boilerplate:
         print("❌ Code is unchanged boilerplate - returning score 0")
+        # Set feedback for boilerplate submissions
+        session.final_evaluation = {
+            "technical_correctness": "no_attempt",
+            "feedback": "No solution submitted. The code is unchanged from the template. Please implement a solution to the problem.",
+            "correctness_reason": "Code contains only boilerplate/template without any implementation",
+            "edge_cases_handled": [],
+            "areas_for_improvement": ["Implement the solution", "Follow the problem requirements"],
+            "final_score": 0,
+            "base_score": 0,
+            "deductions": 0
+        }
         return 0
     
     if not client:
