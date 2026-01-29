@@ -783,22 +783,14 @@ function ProfilePage() {
                           const efficiencyData: any[] = [];
                           profileData.interviews.forEach(interview => {
                             if (interview.questions_data && Array.isArray(interview.questions_data)) {
-                              const totalTime = interview.final_results?.total_time || interview.duration || 120;
-                              const questionCount = interview.questions_data.length;
-                              
                               interview.questions_data.forEach((q: any, i: number) => {
-                                const code = interview.code_submissions?.find((c: any) => 
-                                  c.question_id === q.id || c.question_id === q.question_number || c.question_id === (i + 1)
-                                );
-                                const score = interview.final_results?.individual_scores?.[i] || 0;
-                                const avgTime = totalTime / Math.max(questionCount, 1);
-                                
+                                // Use actual database fields from question_responses table
                                 efficiencyData.push({
-                                  question: `Q${i + 1}`,
-                                  timeTaken: Math.round(avgTime),
-                                  hintsUsed: code?.hints_used_so_far || 0,
-                                  retries: code?.retries || 0,
-                                  completed: score > 0 || !!code
+                                  question: `Q${q.question_index || i + 1}`,
+                                  timeTaken: q.time_taken || 0,
+                                  hintsUsed: q.hints_used || 0,
+                                  retries: 0, // Not currently tracked in question_responses
+                                  completed: (q.score !== null && q.score !== undefined && q.score > 0)
                                 });
                               });
                             }
@@ -823,7 +815,8 @@ function ProfilePage() {
                           profileData.interviews.forEach(interview => {
                             if (interview.questions_data && Array.isArray(interview.questions_data)) {
                               interview.questions_data.forEach((q: any, i: number) => {
-                                const score = interview.final_results?.individual_scores?.[i] || 0;
+                                // Use actual database fields from question_responses table
+                                const score = q.score !== null && q.score !== undefined ? q.score : 0;
                                 const difficultyMap: any = {
                                   'easy': 1,
                                   'medium': 2,
@@ -836,7 +829,7 @@ function ProfilePage() {
                                 scatterData.push({
                                   difficulty,
                                   score: Math.max(0, score),
-                                  question: `Q${i + 1} (${q.difficulty || 'medium'})`
+                                  question: `Q${q.question_index || i + 1} (${q.difficulty || 'medium'})`
                                 });
                               });
                             }

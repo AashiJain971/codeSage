@@ -1447,7 +1447,13 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
         
         # Prepare interview list with full details (limit to recent 50)
         interview_list = []
-        for i in sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]:
+        sorted_interviews = sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]
+        
+        for i in sorted_interviews:
+            # Fetch question responses for this interview using the session_id (stored as 'id' in formatted data)
+            session_id = i.get("id")  # format_interview_data sets id = session_id
+            questions_data = await db.get_question_responses(session_id) if session_id else []
+            
             interview_list.append({
                 "id": i["id"],
                 "type": i["type"],
@@ -1456,7 +1462,7 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
                 "topics": i["topics"],
                 "duration": i["duration_seconds"],
                 "final_results": i.get("final_results", {}),
-                "questions_data": i.get("questions_data", []),
+                "questions_data": questions_data,
                 "code_submissions": i.get("code_submissions", []),
                 "voice_responses": i.get("voice_responses", [])
             })
