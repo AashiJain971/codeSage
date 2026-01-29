@@ -233,13 +233,13 @@ function ProfilePage() {
           className="mb-8"
         >
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-            <div>
+            {/* <div>
               <h1 className="text-4xl font-bold mb-2">
                 Interview <span className="bg-gradient-to-r from-cyan-600 to-violet-600 bg-clip-text text-transparent">Profile</span>
               </h1>
               <p className="text-gray-600">Your portable, verified interview credential</p>
             </div>
-            
+             */}
             {/* View Mode Toggle */}
             <div className="flex items-center gap-3">
               <div className="bg-white rounded-lg shadow-md p-1 flex">
@@ -902,19 +902,48 @@ function ProfilePage() {
                       <h2 className="text-2xl font-bold text-gray-900">Question Completion Funnel</h2>
                     </div>
                     <p className="text-sm text-gray-600 mb-4">
-                      Execution quality and hint dependency analysis
+                      Track your progress from initial question through successful completion
                     </p>
                     <QuestionFunnelChart 
-                      data={{
-                        asked: profileData.interviews.reduce((sum, i) => sum + (i.final_results?.total_questions || 0), 0),
-                        attempted: profileData.interviews.reduce((sum, i) => sum + (i.final_results?.completed_questions || 0), 0),
-                        solved: profileData.interviews.reduce((sum, i) => 
-                          sum + (i.final_results?.individual_scores?.filter((s: number) => s > 0).length || 0), 0
-                        ),
-                        solvedWithoutHints: profileData.interviews.reduce((sum, i) => 
-                          sum + (i.code_submissions?.filter((c: any) => c.hints_used_so_far === 0).length || 0), 0
-                        )
-                      }}
+                      data={(() => {
+                        // Calculate proper funnel data across all interviews
+                        let totalQuestions = 0;
+                        let attempted = 0;
+                        let solved = 0;
+                        let solvedWithoutHints = 0;
+
+                        profileData.interviews.forEach(interview => {
+                          const questions = interview.questions_data || [];
+                          
+                          questions.forEach((q: any) => {
+                            totalQuestions++;
+                            
+                            // Attempted: has any user response
+                            if (q.user_response && q.user_response.trim() !== '') {
+                              attempted++;
+                              
+                              // Solved: has a positive score
+                              const score = parseFloat(q.score) || 0;
+                              if (score > 0) {
+                                solved++;
+                                
+                                // Solved without hints: score > 0 and no hints used
+                                const hintsUsed = parseInt(q.hints_used) || 0;
+                                if (hintsUsed === 0) {
+                                  solvedWithoutHints++;
+                                }
+                              }
+                            }
+                          });
+                        });
+
+                        return {
+                          asked: totalQuestions,
+                          attempted: attempted,
+                          solved: solved,
+                          solvedWithoutHints: solvedWithoutHints
+                        };
+                      })()}
                     />
                   </div>
                 </>

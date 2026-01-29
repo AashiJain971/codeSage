@@ -53,7 +53,7 @@ export default function QuestionFunnelChart({ data }: QuestionFunnelChartProps) 
     ctx.clearRect(0, 0, width, height);
 
     const stages = [
-      { label: 'Asked', count: validData.asked, color: '#3b82f6' },
+      { label: 'Total Questions', count: validData.asked, color: '#3b82f6' },
       { label: 'Attempted', count: validData.attempted, color: '#8b5cf6' },
       { label: 'Solved', count: validData.solved, color: '#10b981' },
       { label: 'Solved Without Hints', count: validData.solvedWithoutHints, color: '#059669' }
@@ -63,7 +63,8 @@ export default function QuestionFunnelChart({ data }: QuestionFunnelChartProps) 
     const stageHeight = chartHeight / stages.length;
 
     stages.forEach((stage, i) => {
-      const percentage = validData.asked > 0 ? (stage.count / validData.asked) * 100 : 0;
+      // First stage is always 100%, others are calculated as % of total questions
+      const percentage = i === 0 ? 100 : (validData.asked > 0 ? (stage.count / validData.asked) * 100 : 0);
       const stageWidth = (percentage / 100) * maxWidth;
       const y = padding.top + i * stageHeight;
       const x = padding.left + (maxWidth - stageWidth) / 2;
@@ -136,7 +137,7 @@ export default function QuestionFunnelChart({ data }: QuestionFunnelChartProps) 
     const chartHeight = rect.height - padding.top - padding.bottom;
 
     const stages = [
-      { label: 'Asked', count: validData.asked },
+      { label: 'Total Questions', count: validData.asked },
       { label: 'Attempted', count: validData.attempted },
       { label: 'Solved', count: validData.solved },
       { label: 'Solved Without Hints', count: validData.solvedWithoutHints }
@@ -149,7 +150,7 @@ export default function QuestionFunnelChart({ data }: QuestionFunnelChartProps) 
     stages.forEach((stage, i) => {
       const y = padding.top + i * stageHeight;
       if (mouseY >= y && mouseY <= y + stageHeight) {
-        const percentage = validData.asked > 0 ? (stage.count / validData.asked) * 100 : 0;
+        const percentage = i === 0 ? 100 : (validData.asked > 0 ? (stage.count / validData.asked) * 100 : 0);
         hovered = {
           label: stage.label,
           count: stage.count,
