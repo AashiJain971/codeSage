@@ -963,10 +963,10 @@ function ProfilePage() {
                       </div>
                       <div className="flex items-baseline gap-2 mb-2">
                         <span className="text-3xl font-bold text-blue-600">
-                          {profileData.swot_analysis.technical_readiness.score}%
+                          {profileData.swot_analysis?.technical_readiness?.score || 0}%
                         </span>
                       </div>
-                      <p className="text-sm text-gray-600">{profileData.swot_analysis.technical_readiness.justification}</p>
+                      <p className="text-sm text-gray-600">{profileData.swot_analysis?.technical_readiness?.justification || 'Not yet evaluated'}</p>
                     </div>
 
                     <div className="bg-white rounded-xl shadow-md p-6">
@@ -976,10 +976,10 @@ function ProfilePage() {
                       </div>
                       <div className="flex items-baseline gap-2 mb-2">
                         <span className="text-3xl font-bold text-purple-600">
-                          {profileData.swot_analysis.behavioral_readiness.score}%
+                          {profileData.swot_analysis?.behavioral_readiness?.score || 0}%
                         </span>
                       </div>
-                      <p className="text-sm text-gray-600">{profileData.swot_analysis.behavioral_readiness.justification}</p>
+                      <p className="text-sm text-gray-600">{profileData.swot_analysis?.behavioral_readiness?.justification || 'Not yet evaluated'}</p>
                     </div>
                   </div>
 
@@ -1081,7 +1081,7 @@ function ProfilePage() {
                       <h3 className="text-xl font-bold text-gray-900">Competency Breakdown</h3>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {Object.entries(profileData.swot_analysis.detailed_breakdown).map(([key, value]) => (
+                      {profileData.swot_analysis?.detailed_breakdown && Object.entries(profileData.swot_analysis.detailed_breakdown).map(([key, value]) => (
                         <div key={key} className="p-4 bg-gray-50 rounded-lg">
                           <div className="flex items-center justify-between mb-2">
                             <h4 className="text-sm font-semibold text-gray-700 capitalize">
@@ -1118,7 +1118,7 @@ function ProfilePage() {
                       <h3 className="text-xl font-bold text-gray-900">Prioritized Recommendations</h3>
                     </div>
                     <ol className="space-y-3">
-                      {profileData.swot_analysis.key_recommendations.map((rec, idx) => (
+                      {profileData.swot_analysis?.key_recommendations && profileData.swot_analysis.key_recommendations.map((rec, idx) => (
                         <motion.li
                           key={idx}
                           initial={{ opacity: 0, x: -10 }}

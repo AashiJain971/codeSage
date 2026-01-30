@@ -979,6 +979,7 @@ async def get_public_profile(user_id: str):
         return {
             "user": {
                 "id": user_id,
+                "email": user_id,  # In public profiles, we use user_id as identifier
                 "created_at": min(i["date"] for i in formatted_interviews) if formatted_interviews else datetime.now().isoformat()
             },
             "stats": {
