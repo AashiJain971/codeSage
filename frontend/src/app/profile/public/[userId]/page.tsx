@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { 
   Award, TrendingUp, Trophy, CheckCircle, Shield, 
-  ExternalLink, ArrowLeft
+  ExternalLink, ArrowLeft, Clock
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -15,6 +15,7 @@ import QuestionFunnelChart from '@/components/charts/QuestionFunnelChart';
 import BehavioralSignalEvolutionChart from '@/components/charts/BehavioralSignalEvolutionChart';
 import DifficultyScatterChart from '@/components/charts/DifficultyScatterChart';
 import TopicHeatmap from '@/components/charts/TopicHeatmap';
+import ProcessEfficiencyChart from '@/components/charts/ProcessEfficiencyChart';
 
 interface PublicProfileData {
   user: {
@@ -399,72 +400,90 @@ export default function PublicProfilePage() {
           </div>
         )}
 
-        {/* Process Efficiency & Question Funnel */}
-        {profileData.process_efficiency && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Process Efficiency */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.55 }}
-              className="bg-white rounded-xl shadow-md p-6"
-            >
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Process Efficiency</h2>
-              <div className="space-y-4">
-                <div className="p-4 bg-blue-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-700">Avg Time per Question</span>
-                    <span className="text-lg font-bold text-blue-600">
-                      {Math.floor(profileData.process_efficiency.avg_time_per_question / 60)}m {Math.round(profileData.process_efficiency.avg_time_per_question % 60)}s
-                    </span>
-                  </div>
-                </div>
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-700">Completion Rate</span>
-                    <span className="text-lg font-bold text-green-600">
-                      {profileData.process_efficiency.completion_rate.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className="bg-green-500 h-2 rounded-full"
-                      style={{ width: `${profileData.process_efficiency.completion_rate}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="p-4 bg-purple-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-700">Questions Attempted</span>
-                    <span className="text-lg font-bold text-purple-600">
-                      {profileData.process_efficiency.total_attempted}/{profileData.process_efficiency.total_expected}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
+        {/* Process Efficiency & Difficulty Performance Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Process Efficiency Map */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.55 }}
+            className="bg-white rounded-xl shadow-md p-6"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <Clock className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Process Efficiency</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Time taken, hints used, and retries per question
+            </p>
+            <ProcessEfficiencyChart 
+              data={(() => {
+                const efficiencyData: any[] = [];
+                profileData.interviews.forEach(interview => {
+                  if (interview.questions_data && Array.isArray(interview.questions_data)) {
+                    interview.questions_data.forEach((q: any, i: number) => {
+                      // Use actual database fields from question_responses table
+                      efficiencyData.push({
+                        question: `Q${q.question_index || i + 1}`,
+                        timeTaken: q.time_taken || 0,
+                        hintsUsed: q.hints_used || 0,
+                        retries: 0, // Not currently tracked in question_responses
+                        completed: (q.score !== null && q.score !== undefined && q.score > 0)
+                      });
+                    });
+                  }
+                });
+                return efficiencyData.slice(0, 10);
+              })()}
+            />
+          </motion.div>
 
-            {/* Question Completion Funnel */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-              className="bg-white rounded-xl shadow-md p-6 overflow-hidden"
-            >
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Question Completion Funnel</h2>
-              <div className="overflow-hidden">
-                <QuestionFunnelChart 
-                  data={{
-                    asked: profileData.stats.total_questions,
-                    attempted: profileData.process_efficiency.total_attempted,
-                    solved: Math.round(profileData.stats.total_questions * (profileData.stats.average_score / 100)),
-                    solvedWithoutHints: Math.round(profileData.stats.total_questions * (profileData.stats.average_score / 120))
-                  }}
-                />
-              </div>
-            </motion.div>
-          </div>
-        )}
+          {/* Difficulty vs Performance Scatter */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className="bg-white rounded-xl shadow-md p-6 overflow-hidden"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <TrendingUp className="w-6 h-6 text-green-600" />
+              <h2 className="text-xl font-bold text-gray-900">Difficulty vs Performance</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              How you perform as complexity increases
+            </p>
+            <div className="overflow-hidden">
+              <DifficultyScatterChart 
+                data={(() => {
+                  const scatterData: any[] = [];
+                  profileData.interviews.forEach(interview => {
+                    if (interview.questions_data && Array.isArray(interview.questions_data)) {
+                      interview.questions_data.forEach((q: any, i: number) => {
+                        // Use actual database fields from question_responses table
+                        const score = q.score !== null && q.score !== undefined ? q.score : 0;
+                        const difficultyMap: any = {
+                          'easy': 1,
+                          'medium': 2,
+                          'hard': 3,
+                          'very hard': 4,
+                          'expert': 5
+                        };
+                        const difficulty = difficultyMap[q.difficulty?.toLowerCase()] || 2;
+                        
+                        scatterData.push({
+                          difficulty,
+                          score: Math.max(0, score),
+                          question: `Q${q.question_index || i + 1} (${q.difficulty || 'medium'})`
+                        });
+                      });
+                    }
+                  });
+                  return scatterData.filter(d => d.score >= 0);
+                })()}
+              />
+            </div>
+          </motion.div>
+        </div>
 
         {/* Competency Breakdown & Prioritized Recommendations */}
         {profileData.swot_analysis && profileData.swot_analysis.detailed_breakdown && (

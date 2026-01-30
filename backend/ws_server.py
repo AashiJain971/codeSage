@@ -1743,8 +1743,14 @@ async def get_public_profile(user_id: str):
         recent_dates = [i["date"] for i in recent_for_chart]
         
         # Prepare comprehensive interview data for analytics
-        interview_list = [
-            {
+        interview_list = []
+        
+        for i in sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]:
+            # Fetch question responses for this interview
+            session_id = i.get("id")
+            questions_data = await db.get_question_responses(session_id) if session_id else []
+            
+            interview_list.append({
                 "id": i["id"],
                 "type": i["type"],
                 "date": i["date"],
@@ -1754,14 +1760,12 @@ async def get_public_profile(user_id: str):
                 "questions_completed": i["questions_completed"],
                 "total_questions": i["total_questions"],
                 "final_results": i.get("final_results", {}),
-                "questions_data": i.get("questions_data", [])
-            }
-            for i in sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]
-        ]
+                "questions_data": questions_data
+            })
         
         # Calculate language distribution
         language_counts = defaultdict(int)
-        for interview in formatted_interviews:
+        for interview in interview_list:
             questions_data = interview.get("questions_data", [])
             if isinstance(questions_data, list):
                 for q in questions_data:
