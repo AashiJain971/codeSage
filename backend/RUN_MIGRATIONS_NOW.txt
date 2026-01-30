@@ -1,0 +1,45 @@
+======================================================================
+CRITICAL: RUN THESE 2 MIGRATIONS IN SUPABASE NOW
+======================================================================
+
+Your backend is switched to api.py, but you MUST run migrations to enable caching!
+
+STEP 1: Create the user_profiles table
+--------------------------------------
+1. Go to: https://supabase.com/dashboard (your project)
+2. Click: SQL Editor (left sidebar)
+3. Copy EVERYTHING from: migrations/add_swot_analysis_cache.sql
+4. Paste in SQL Editor
+5. Click: RUN
+
+STEP 2: Fix RLS policy
+--------------------------------------
+1. Still in SQL Editor
+2. Copy EVERYTHING from: migrations/fix_rls_user_profiles.sql
+3. Paste in SQL Editor
+4. Click: RUN
+
+======================================================================
+WHAT THIS DOES:
+======================================================================
+
+Creates a cache table so SWOT analysis is:
+- Generated ONCE
+- Saved in database
+- Reused on future requests
+- Only regenerated when interviews change
+
+Without this: SWOT regenerates EVERY request → Rate limit errors ❌
+With this: SWOT cached and reused → No rate limits ✅
+
+======================================================================
+VERIFICATION:
+======================================================================
+
+After running both migrations, refresh your profile:
+
+First request: "🎯 Generating NEW SWOT analysis"
+Second request: "✅ Using cached SWOT analysis"
+
+If you see "✅ Using cached" → Success! 🎉
+If still generating → Double-check migrations ran successfully

@@ -1,0 +1,43 @@
+========================================================================
+HOW TO FIX: "Could not fetch user email from auth: User not allowed"
+========================================================================
+
+The issue is that fetching user emails requires a SERVICE ROLE KEY, 
+not just the anon key.
+
+STEP 1: Get Your Service Role Key
+----------------------------------
+1. Go to: https://supabase.com/dashboard (your project)
+2. Click: Settings (gear icon) → API
+3. Scroll to: "Project API keys"
+4. Find: "service_role" key (secret)
+5. Click: "Reveal" and copy it
+
+STEP 2: Add to .env File
+----------------------------------
+1. Open: backend/.env
+2. Add this line:
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+3. Save the file
+
+STEP 3: Restart Backend
+----------------------------------
+Kill and restart the backend server:
+uvicorn ws_server:app --host 127.0.0.1 --port 8000 --reload
+
+STEP 4: Verify
+----------------------------------
+You should see in the logs:
+✅ Supabase Service Role Key: ✅ Found
+✅ Supabase admin client initialized successfully
+
+Then when you visit a public profile, you'll see:
+✅ Found user email: your@email.com
+
+========================================================================
+SECURITY NOTE
+========================================================================
+⚠️  NEVER commit the service role key to git!
+⚠️  The service role key has full admin access
+⚠️  Only use it on the backend server
+⚠️  Make sure .env is in .gitignore
