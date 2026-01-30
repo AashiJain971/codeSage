@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { 
   Award, TrendingUp, Trophy, CheckCircle, Shield, 
-  ExternalLink, ArrowLeft, Clock
+  ExternalLink, ArrowLeft, Clock, Code2, Zap
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -16,6 +16,7 @@ import BehavioralSignalEvolutionChart from '@/components/charts/BehavioralSignal
 import DifficultyScatterChart from '@/components/charts/DifficultyScatterChart';
 import TopicHeatmap from '@/components/charts/TopicHeatmap';
 import ProcessEfficiencyChart from '@/components/charts/ProcessEfficiencyChart';
+import LanguageDistributionChart from '@/components/charts/LanguageDistributionChart';
 
 interface PublicProfileData {
   user: {
@@ -295,38 +296,18 @@ export default function PublicProfilePage() {
             </motion.div>
 
             {/* Languages Used */}
-            {profileData.language_distribution && Object.keys(profileData.language_distribution).length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="bg-white rounded-xl shadow-md p-6"
-              >
-                <h2 className="text-xl font-bold text-gray-900 mb-6">Languages Used</h2>
-                <div className="space-y-3">
-                  {Object.entries(profileData.language_distribution)
-                    .sort(([, a], [, b]) => (b as number) - (a as number))
-                    .map(([lang, count]) => (
-                      <div key={lang} className="flex items-center gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-700 capitalize">{lang}</span>
-                            <span className="text-sm text-gray-500">{count} questions</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className="bg-gradient-to-r from-cyan-500 to-blue-500 h-2 rounded-full transition-all"
-                              style={{ 
-                                width: `${(count as number / Math.max(...Object.values(profileData.language_distribution) as number[])) * 100}%` 
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </motion.div>
-            )}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="bg-white rounded-xl shadow-md p-6"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <Code2 className="w-6 h-6 text-indigo-600" />
+                <h2 className="text-xl font-bold text-gray-900">Languages Used</h2>
+              </div>
+              <LanguageDistributionChart interviews={profileData.interviews} />
+            </motion.div>
           </div>
         )}
 
@@ -340,7 +321,16 @@ export default function PublicProfilePage() {
               transition={{ delay: 0.45 }}
               className="bg-white rounded-xl shadow-md p-6 overflow-hidden"
             >
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Behavioral Signal Evolution</h2>
+              <div className="flex items-center gap-3 mb-6">
+                <Zap className="w-6 h-6 text-purple-600" />
+                <h2 className="text-xl font-bold text-gray-900">Behavioral Signal Evolution</h2>
+                <span className="ml-auto text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-medium">
+                  CodeSage Unique
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                Track how your soft skills evolved across interviews - confidence, ownership, clarity, and recovery abilities
+              </p>
               <div className="overflow-hidden">
                 <BehavioralSignalEvolutionChart 
                   data={profileData.interviews.map((interview: any) => ({
