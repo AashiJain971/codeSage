@@ -1660,7 +1660,7 @@ async def get_user_profile(user_id: str = Depends(get_current_user)):
 
 @app.get("/api/profile/public/{user_id}")
 async def get_public_profile(user_id: str):
-    """Get public profile view - recruiter/shareable version with limited information"""
+    """Get public profile view - recruiter/shareable version with comprehensive analytics"""
     try:
         # Fetch all interviews for this user
         all_interviews = await db.get_user_interviews(user_id, limit=1000)
@@ -1683,7 +1683,7 @@ async def get_public_profile(user_id: str):
                           sum(i["total_questions"] for i in completed_interviews) * 100 
                           if sum(i["total_questions"] for i in completed_interviews) > 0 else 0)
         
-        # Calculate skills (same as private, but we only expose aggregate)
+        # Calculate skills
         recent_interviews = sorted(completed_interviews, key=lambda x: x["date"], reverse=True)[:10]
         
         skills = {
@@ -1736,26 +1736,107 @@ async def get_public_profile(user_id: str):
         else:
             trend = "stable"
         
-        # Generate strengths (public view - only positive highlights)
-        strengths = []
-        sorted_skills = sorted(skills.items(), key=lambda x: x[1], reverse=True)
+        # Get recent scores and dates for performance trend chart
+        recent_for_chart = sorted(completed_interviews, key=lambda x: x["date"], reverse=True)[:15]
+        recent_for_chart.reverse()  # Oldest to newest for chart
+        recent_scores = [i["score"] for i in recent_for_chart]
+        recent_dates = [i["date"] for i in recent_for_chart]
         
-        for skill, value in sorted_skills[:3]:
-            if value >= 70:
-                strengths.append(f"Strong {skill.replace('_', ' ')} capabilities ({value}%)")
+        # Prepare comprehensive interview data for analytics
+        interview_list = [
+            {
+                "id": i["id"],
+                "type": i["type"],
+                "date": i["date"],
+                "score": i["score"],
+                "topics": i["topics"],
+                "duration": i["duration"],
+                "questions_completed": i["questions_completed"],
+                "total_questions": i["total_questions"],
+                "final_results": i.get("final_results", {}),
+                "questions_data": i.get("questions_data", [])
+            }
+            for i in sorted(formatted_interviews, key=lambda x: x["date"], reverse=True)[:50]
+        ]
         
-        if completion_rate >= 80:
-            strengths.append(f"High completion rate ({completion_rate:.0f}%)")
-        if average_score >= 75:
-            strengths.append(f"Consistent high performance (avg {average_score:.0f}%)")
-        if trend == "improving":
-            strengths.append("Demonstrating continuous improvement")
+        # Calculate language distribution
+        language_counts = defaultdict(int)
+        for interview in formatted_interviews:
+            questions_data = interview.get("questions_data", [])
+            if isinstance(questions_data, list):
+                for q in questions_data:
+                    lang = q.get("language", "python") if isinstance(q, dict) else "python"
+                    language_counts[lang] += 1
         
-        if not strengths:
-            strengths = [
-                "Active interview participant",
-                "Building technical interview experience",
-                "Committed to skill development"
+        # Calculate process efficiency metrics
+        total_expected = sum(i["total_questions"] for i in completed_interviews)
+        total_attempted = sum(i["questions_completed"] for i in completed_interviews)
+        avg_time_per_question = total_duration / total_attempted if total_attempted > 0 else 0
+        
+        # Generate prioritized recommendations based on real data
+        recommendations = []
+        
+        # Topic-based recommendations
+        topic_scores = defaultdict(list)
+        for interview in completed_interviews:
+            for topic in interview.get("topics", []):
+                if interview["score"] > 0:
+                    topic_scores[topic].append(interview["score"])
+        
+        weak_topics = []
+        for topic, scores in topic_scores.items():
+            avg = sum(scores) / len(scores)
+            if avg < 60:
+                weak_topics.append({"topic": topic, "score": round(avg), "attempts": len(scores)})
+        
+        weak_topics.sort(key=lambda x: x["score"])
+        for topic_data in weak_topics[:3]:
+            recommendations.append({
+                "category": "Technical Skills",
+                "suggestion": f"Focus on {topic_data['topic']} (current avg: {topic_data['score']}%)",
+                "priority": "high" if topic_data["score"] < 50 else "medium"
+            })
+        
+        # Completion rate recommendation
+        if completion_rate < 80:
+            recommendations.append({
+                "category": "Time Management",
+                "suggestion": f"Improve question completion rate (currently {completion_rate:.0f}%)",
+                "priority": "high"
+            })
+        
+        # Consistency recommendation
+        if len(scores) > 3:
+            score_variance = sum((s - average_score) ** 2 for s in scores) / len(scores)
+            score_std = score_variance ** 0.5
+            if score_std > 20:
+                recommendations.append({
+                    "category": "Consistency",
+                    "suggestion": "Work on maintaining consistent performance across interviews",
+                    "priority": "medium"
+                })
+        
+        # Performance trend recommendation
+        if trend == "declining":
+            recommendations.append({
+                "category": "Performance",
+                "suggestion": "Review fundamentals - recent scores show declining trend",
+                "priority": "high"
+            })
+        
+        # Default recommendations if none generated
+        if not recommendations:
+            recommendations = [
+                {
+                    "category": "Growth",
+                    "suggestion": "Continue practicing to build consistency",
+                    "priority": "medium"
+                },
+                {
+                    "category": "Skill Development",
+                    "suggestion": "Expand into new technical areas",
+                    "priority": "low"
+                }
             ]
         
         # Calculate trust score
@@ -1766,7 +1847,25 @@ async def get_public_profile(user_id: str):
             (20 if trend == "improving" else 10)
         ))
         
-        # Return public profile (no sensitive data)
+        # Generate SWOT analysis for detailed insights (same as private profile)
+        stats_for_swot = {
+            "total_interviews": total_interviews,
+            "average_score": average_score,
+            "completion_rate": completion_rate,
+            "trend": trend,
+            "total_questions": total_questions
+        }
+        
+        swot_analysis = None
+        if total_interviews >= 2:  # Generate SWOT if enough data
+            swot_analysis = await generate_swot_analysis(
+                completed_interviews,
+                skills,
+                stats_for_swot,
+                interview_list
+            )
+        
+        # Return comprehensive public profile
         return {
             "user": {
                 "id": user_id,
@@ -1782,9 +1881,20 @@ async def get_public_profile(user_id: str):
             },
             "skills": skills,
             "performance": {
-                "trend": trend
+                "trend": trend,
+                "recent_scores": recent_scores,
+                "dates": recent_dates
             },
-            "strengths": strengths,
+            "interviews": interview_list,
+            "language_distribution": dict(language_counts),
+            "process_efficiency": {
+                "avg_time_per_question": round(avg_time_per_question, 1),
+                "completion_rate": round(completion_rate, 1),
+                "total_attempted": total_attempted,
+                "total_expected": total_expected
+            },
+            "recommendations": recommendations,
+            "swot_analysis": swot_analysis,  # Same detailed analysis as private profile
             "trustScore": round(trust_score, 0)
         }
         

@@ -3,7 +3,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   User, Award, TrendingUp, Target, CheckCircle, CheckCircle2, Brain, 
-  Share2, Lock, Unlock, Copy, ExternalLink, Calendar,
+  Share2, Copy, ExternalLink, Calendar,
   Code2, MessageSquare, Zap, Eye, Download, BarChart3,
   Trophy, Shield, Clock, FileText, Star, AlertCircle
 } from 'lucide-react';
@@ -93,7 +93,6 @@ function ProfilePage() {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'private' | 'public'>('private');
   const [shareableLink, setShareableLink] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [expandedInterview, setExpandedInterview] = useState<string | null>(null);
@@ -242,30 +241,17 @@ function ProfilePage() {
              */}
             {/* View Mode Toggle */}
             <div className="flex items-center gap-3">
-              <div className="bg-white rounded-lg shadow-md p-1 flex">
-                <button
-                  onClick={() => setViewMode('private')}
-                  className={`px-4 py-2 rounded-md transition flex items-center gap-2 ${
-                    viewMode === 'private'
-                      ? 'bg-gradient-to-r from-cyan-600 to-violet-600 text-white'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <Lock className="w-4 h-4" />
-                  Private View
-                </button>
-                <button
-                  onClick={() => setViewMode('public')}
-                  className={`px-4 py-2 rounded-md transition flex items-center gap-2 ${
-                    viewMode === 'public'
-                      ? 'bg-gradient-to-r from-cyan-600 to-violet-600 text-white'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  <Eye className="w-4 h-4" />
-                  Public View
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  if (profileData?.user?.id) {
+                    window.open(`/profile/public/${profileData.user.id}`, '_blank');
+                  }
+                }}
+                className="px-4 py-2 bg-white rounded-lg shadow-md hover:shadow-lg transition flex items-center gap-2 text-gray-700 hover:text-blue-600"
+              >
+                <Eye className="w-4 h-4" />
+                View Public Profile
+              </button>
               
               {/* Share Button */}
               <button
@@ -360,33 +346,25 @@ function ProfilePage() {
           </div>
         </motion.div>
 
-        {/* Main Content - Changes based on view mode */}
-        <AnimatePresence mode="wait">
-          {viewMode === 'private' ? (
-            <motion.div
-              key="private"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="space-y-8"
-            >
-              {/* Skills Assessment */}
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <Brain className="w-6 h-6 text-blue-600" />
-                  <h2 className="text-2xl font-bold text-gray-900">Skill Assessment</h2>
-                  <span className="ml-auto text-sm text-gray-500 italic">AI-Generated from {profileData.stats.total_interviews} interviews</span>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div>
-                    <SkillRadarChart skills={profileData.skills} />
-                  </div>
-                  <div className="h-full">
-                    <SkillDistributionChart skills={profileData.skills} />
-                  </div>
-                </div>
+        {/* Main Content - Private View Only */}
+        <div className="space-y-8">
+          {/* Skills Assessment */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <Brain className="w-6 h-6 text-blue-600" />
+              <h2 className="text-2xl font-bold text-gray-900">Skill Assessment</h2>
+              <span className="ml-auto text-sm text-gray-500 italic">AI-Generated from {profileData.stats.total_interviews} interviews</span>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <SkillRadarChart skills={profileData.skills} />
               </div>
+              <div className="h-full">
+                <SkillDistributionChart skills={profileData.skills} />
+              </div>
+            </div>
+          </div>
 
               {/* Performance Analytics Grid */}
               {profileData.performance.recent_scores.length > 0 && (
@@ -1228,145 +1206,37 @@ function ProfilePage() {
                   </a>
                 </div>
               )}
-            </motion.div>
-          ) : (
-            /* Public View */
-            <motion.div
-              key="public"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="space-y-8"
-            >
-              {/* Public Info Notice */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-                <Unlock className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-semibold text-blue-900 mb-1">Public View Mode</h3>
-                  <p className="text-sm text-blue-700">
-                    This is what recruiters and hiring managers see when you share your profile.
-                    Sensitive details like individual questions, detailed feedback, and internal metrics are hidden.
-                  </p>
-                </div>
-              </div>
-
-              {/* Public Skills Overview */}
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Skills Overview</h2>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <SkillRadarChart skills={profileData.skills} />
-                  <div className="space-y-4">
-                    {Object.entries(profileData.skills).map(([skill, value]) => (
-                      <div key={skill}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="font-medium text-gray-700 capitalize">
-                            {skill.replace('_', ' ')}
-                          </span>
-                          <span className={`font-bold ${getScoreColor(value)}`}>{value}%</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            style={{ width: `${value}%` }}
-                            className={`h-2 rounded-full ${
-                              value >= 80 ? 'bg-green-500' :
-                              value >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Performance Summary */}
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Performance Summary</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                  <div>
-                    <Trophy className="w-12 h-12 text-yellow-500 mx-auto mb-2" />
-                    <h3 className="text-3xl font-bold text-gray-900">{profileData.stats.total_interviews}</h3>
-                    <p className="text-gray-600 text-sm">Total Interviews</p>
-                  </div>
-                  <div>
-                    <Target className="w-12 h-12 text-blue-600 mx-auto mb-2" />
-                    <h3 className="text-3xl font-bold text-gray-900">{profileData.stats.average_score}%</h3>
-                    <p className="text-gray-600 text-sm">Average Score</p>
-                  </div>
-                  <div>
-                    <TrendingUp className="w-12 h-12 text-green-600 mx-auto mb-2" />
-                    <h3 className="text-2xl font-bold text-green-900 capitalize">{profileData.performance.trend}</h3>
-                    <p className="text-gray-600 text-sm">Performance Trend</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Key Strengths (Public) */}
-              {profileData.strengths.length > 0 && (
-                <div className="bg-white rounded-xl shadow-md p-6">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Key Strengths</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {profileData.strengths.map((strength, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-start gap-3 p-4 bg-green-50 rounded-lg"
-                      >
-                        <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-gray-700">{strength}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Verification Footer */}
-              <div className="bg-gradient-to-r from-cyan-600 to-violet-600 rounded-xl p-6 text-white">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">AI-Evaluated & Verified</h3>
-                    <p className="text-cyan-100 text-sm">
-                      This profile is backed by real interview sessions with comprehensive AI analysis.
-                      All scores and evaluations are auditable and session-based.
-                    </p>
-                  </div>
-                  <Shield className="w-16 h-16 text-white opacity-50" />
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </div>
 
         {/* Shareable Link Section */}
-        {viewMode === 'private' && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-8 bg-white rounded-xl shadow-md p-6"
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <Share2 className="w-6 h-6 text-blue-600" />
-              <h2 className="text-xl font-bold text-gray-900">Share Your Profile</h2>
-            </div>
-            <p className="text-gray-600 mb-4">
-              Share this link with recruiters and hiring managers. They'll see only your public profile view.
-            </p>
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={shareableLink}
-                readOnly
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700"
-              />
-              <button
-                onClick={copyShareableLink}
-                className="px-6 py-2 bg-gradient-to-r from-cyan-600 to-violet-600 text-white rounded-lg hover:shadow-lg transition flex items-center gap-2"
-              >
-                {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-          </motion.div>
-        )}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-8 bg-white rounded-xl shadow-md p-6"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <Share2 className="w-6 h-6 text-blue-600" />
+            <h2 className="text-xl font-bold text-gray-900">Share Your Profile</h2>
+          </div>
+          <p className="text-gray-600 mb-4">
+            Share this link with recruiters and hiring managers. They'll see only your public profile view.
+          </p>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={shareableLink}
+              readOnly
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700"
+            />
+            <button
+              onClick={copyShareableLink}
+              className="px-6 py-2 bg-gradient-to-r from-cyan-600 to-violet-600 text-white rounded-lg hover:shadow-lg transition flex items-center gap-2"
+            >
+              {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </motion.div>
       </div>
     </div>
   );
