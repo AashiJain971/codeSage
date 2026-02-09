@@ -30,3 +30,5 @@ cryptography==42.0.2
 
 # Utilities
 python-dotenv==1.0.0
+setuptools<81
+wheel
